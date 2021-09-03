@@ -8,3 +8,4 @@ src/version.h
 src/version.h.new
 __pycache__
 docker/opt
+.ipynb_checkpoints
