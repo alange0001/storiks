@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.2)
 
-project (rocksdb_test)
+project (storiks)
 
 SET(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
 SET(BUILD_SHARED_LIBS OFF)
@@ -46,17 +46,17 @@ include_directories("${CMAKE_CURRENT_SOURCE_DIR}/3rd-party/nlohmann")
 
 #################################################################
 
-add_executable(rocksdb_test rocksdb_test.cc util.cc args.cc)
-target_link_libraries(rocksdb_test ${THIRDPARTY_LIBS})
-set_property(TARGET rocksdb_test PROPERTY CXX_STANDARD 17)
-#set_property(TARGET rocksdb_test PROPERTY POSITION_INDEPENDENT_CODE ON)
+add_executable(storiks src/storiks.cc src/util.cc src/args.cc)
+target_link_libraries(storiks ${THIRDPARTY_LIBS})
+set_property(TARGET storiks PROPERTY CXX_STANDARD 17)
+#set_property(TARGET storiks PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-add_executable(access_time3 access_time3.cc access_time3_args.cc util.cc)
+add_executable(access_time3 src/access_time3.cc src/access_time3_args.cc src/util.cc)
 target_link_libraries(access_time3 ${THIRDPARTY_LIBS} aio)
 set_property(TARGET access_time3 PROPERTY CXX_STANDARD 17)
 #set_property(TARGET access_time3 PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-add_executable(test test.cc util.cc)
+add_executable(test src/test.cc src/util.cc)
 target_link_libraries(test ${THIRDPARTY_LIBS} aio)
 set_property(TARGET test PROPERTY CXX_STANDARD 17)
 #set_property(TARGET test PROPERTY POSITION_INDEPENDENT_CODE ON)

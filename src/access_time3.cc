@@ -1058,7 +1058,7 @@ class Program {
 	int main(int argc, char** argv) noexcept {
 		using namespace std::chrono;
 
-		spdlog::info("Initializing program access_time3 version {}", ROCKSDB_TEST_VERSION);
+		spdlog::info("Initializing program access_time3, " PROJECT_NAME " version {}", PROJECT_VERSION);
 		try {
 			args.reset(new Args(argc, argv));
 

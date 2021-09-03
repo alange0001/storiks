@@ -1,0 +1,518 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+@author: Adriano Lange <alange0001@gmail.com>
+
+Copyright (c) 2020-present, Adriano Lange.  All rights reserved.
+This source code is licensed under both the GPLv2 (found in the
+LICENSE file in the root directory) and Apache 2.0 License
+(found in the LICENSE.Apache file in the root directory).
+"""
+
+import os
+import re
+import subprocess
+import sys
+import time
+import json
+import getpass
+import argparse
+import traceback
+
+# =============================================================================
+import logging
+log = logging.getLogger('storiksctl')
+log.setLevel(logging.INFO)
+
+
+# =============================================================================
+class Config:
+	_conf = None
+
+	def __init__(self):
+		d = dict()
+		self._conf = d
+		d['PROJECT_NAME'   ]   = 'storiks'
+		d['PROJECT_VERSION']   = '0.1'
+		d['DOCKER_ACCOUNT' ]   = 'alange0001'
+		d['DOCKER_IMAGE'   ]   = f'{d["DOCKER_ACCOUNT"]}/{d["PROJECT_NAME"]}:{d["PROJECT_VERSION"]}'
+		d['COMMUNICATION_DIR'] = '/tmp/storiks'  # default communication directory between containers
+		d['NOTEBOOK_URL_FILE'] = 'jupyter-notebook.url'
+
+	def items(self):
+		return self._conf.items()
+
+	def __getitem__(self, item):
+		return self._conf.get(item)
+
+	def __getattr__(self, item):
+		return self._conf[item] if item in self._conf.keys() else getattr(self, item)
+
+	def print_version(self):
+		print(f'Project {self.PROJECT_NAME} version {self.PROJECT_VERSION}')
+
+	def print_version_h(self):
+		print(f'#pragma once')
+		for k, v in self.items():
+			vf = f'{v}' if isinstance(v, int) or isinstance(v, float) else f'"{v}"'
+			print(f'#define {k} {vf}')
+
+	def print_version_py(self):
+		for k, v in self.items():
+			vf = f'{v}' if isinstance(v, int) or isinstance(v, float) else f'"{v}"'
+			print(f'{k} = {vf}')
+
+
+config = Config()
+
+
+# =============================================================================
+class ArgsWrapper:  # single global instance of "args"
+	def get_args(self):
+		parser = argparse.ArgumentParser(
+			description="Storiks Control")
+		parser.add_argument('-l', '--log_level', type=str,
+			default='INFO', choices=[ 'debug', 'DEBUG', 'info', 'INFO' ],
+			help='Log level.')
+		parser.add_argument('--version',
+			default=False, action='store_true',
+			help='Print version and exit.')
+		parser.add_argument('--version_h',
+			default=False, action='store_true',
+			help='Output version.h and exit (internal use).')
+		parser.add_argument('--version_py',
+			default=False, action='store_true',
+			help='Output version.py and exit (internal use).')
+
+		subparser = parser.add_subparsers(dest='subcommand', title='Subcommands')
+		Subcommand.registerall(subparser)
+
+		args = parser.parse_args()
+
+		log_h = logging.StreamHandler()
+		# log_h.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s: %(message)s'))
+		log_h.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+		log.addHandler(log_h)
+		log.setLevel(getattr(logging, args.log_level.upper()))
+
+		log.debug(f'Args: {str(args)}')
+
+		return args
+
+	def __getattr__(self, name):
+		global args
+		args = self.get_args()
+		return getattr(args, name)
+
+
+args = ArgsWrapper()
+
+
+# =============================================================================
+class Subcommand:
+	_subclasses_ = dict()
+	@classmethod
+	def add_subclass(cls, add_cls):
+		cls._subclasses_[add_cls._name_] = add_cls
+
+	@classmethod
+	def registerall(cls, subparser):
+		for c in cls._subclasses_.values():
+			c.register(subparser)
+
+	@classmethod
+	def subcommand_by_name(cls, name):
+		return cls._subclasses_.get(name)
+
+	def _execute(self, cmd: str, raise_except=True) -> bool:
+		r = os.system(cmd)
+		if r != 0:
+			if raise_except:
+				raise Exception(f'command returned error code {r}')
+			else:
+				log.error(f'command returned error code {r}')
+				return False
+		return True
+
+	def _get_cmd_output(self, cmd) -> str:
+		st, out = subprocess.getstatusoutput(cmd)
+		if st != 0:
+			raise Exception(f'command "{cmd}" returned error code {st}')
+		return out
+
+	def _test_dir_abs(self, dirname):
+		if not os.path.isdir(dirname):
+			raise Exception(f'directory "{dirname}" does not exist')
+		return os.path.abspath(dirname)
+
+	_url_cache_ = None
+	def _get_notebook_url(self):
+		if self._url_cache_ is not None:
+			return self._url_cache_
+
+		if not self._get_container_status():
+			raise Exception('storiks container is not running')
+
+		env = self._get_container_env()
+		filename = f'{env["STORIKS_COMMUNICATION_DIR"]}/{config.NOTEBOOK_URL_FILE}'
+		timeout = 5
+		for i in range(timeout):
+			if os.path.isfile(filename):
+				break
+			time.sleep(1)
+		if not os.path.isfile(filename):
+			log.error(f'failed to open notebook\'s url file: {filename}')
+			return
+		with open(filename, 'rt') as f:
+			url = re.findall(r'.*', f.readline())[0]
+
+		self._url_cache_ = url
+		return url
+
+	_metadata_cache_ = None
+	def _get_container_metadata(self, reload=False):
+		if reload == False and self._metadata_cache_ is not None:
+			return self._metadata_cache_
+
+		st, out = subprocess.getstatusoutput('docker inspect storiks')
+		if st == 0:
+			j = json.loads(out)
+			if len(j) > 0:
+				self._metadata_cache_ = j[0]
+				return j[0]
+		return None
+
+	_env_cache_ = None
+	def _get_container_env(self):
+		if self._env_cache_ is not None:
+			return self._env_cache_
+
+		metadata = self._get_container_metadata()
+		if metadata is None:
+			raise Exception('failed to get storiks metadata')
+		envlist = self._get_recursive(metadata, 'Config', 'Env')
+		if envlist is None:
+			raise Exception('failed to get storiks environment variables')
+		ret = dict()
+		for e in envlist:
+			aux = e.split('=')
+			ret[aux[0]] = '='.join(aux[1:])
+
+		self._env_cache_ = ret
+		return ret
+
+	def _get_container_status(self):
+		m = self._get_container_metadata(reload=True)
+		if m is None:
+			return False
+		return self._get_recursive(m, 'State', 'Running') is True
+
+	def _get_recursive(self, value, *attributes):
+		cur_v = value
+		for i in attributes:
+			try:
+				cur_v = cur_v[i]
+			except:
+				return None
+		return cur_v
+
+	def _str_as_bool(self, value:str, default=False, invalid=False):
+		if value is None:
+			return default
+		ev = value.strip().lower()
+		if ev == '':
+			return default
+		if ev in ['1', 't', 'true', 'y', 'yes']:
+			return True
+		if ev in ['0', 'f', 'false', 'n', 'no']:
+			return False
+		return invalid
+
+
+# =============================================================================
+class Start (Subcommand):
+	_name_ = 'start'
+	@classmethod
+	def register(cls, subparser):
+		parser2 = subparser.add_parser('start', help='Start the main container.')
+		parser2.add_argument('-d', '--data_dir', type=str, default=None, required=True,
+			help='Directory used to store both database and access_time3 files.')
+		parser2.add_argument('--data_dev', type=str, default=None, required=False,
+			help='Device name of --data_dir (e.g., sda, nvme0n1).')
+		parser2.add_argument('-o', '--output_dir', type=str, default=None, required=True,
+			help='Directory used to store the output files.')
+		parser2.add_argument('-c', '--communication_dir', type=str,
+			default=config.COMMUNICATION_DIR,
+			help='Directory used to store sockets and other config files.')
+		parser2.add_argument('-i', '--docker_image', type=str,
+			default=config.DOCKER_IMAGE,
+			help='Override the default docker image.')
+		parser2.add_argument('-a', '--docker_params', type=str, nargs='*',
+			default=[],
+			help='Extra docker params.')
+		parser2.add_argument('-e', '--docker_env', type=str, nargs='*',
+			default=[],
+			help='Add extra environment variables.')
+		parser2.add_argument('--perfmon', type=str, default='true', nargs='?',
+			help='Run performancemonitor (true|false). Default: true.')
+		parser2.add_argument('--foreground',
+			default=False, action='store_true',
+			help='Keep terminal attached to the storiks container.')
+		return parser2
+
+	def __init__(self):
+		args.perfmon = self._str_as_bool(args.perfmon, default=True)
+
+		if self._get_container_metadata() is not None:
+			raise Exception(f'There is an instance of storiks running or stopped. '
+					'Please use "storiksctl stop" or remove the previous storiks container before '
+					'starting another instance.')
+
+		docker_params = ' '.join(args.docker_params)
+
+		cmd = f'docker run  ' \
+					f'--rm --name=storiks ' \
+					f'{"--detach" if not args.foreground else ""} ' \
+					f'--privileged ' \
+					f'{self._get_args_groups()} ' \
+					f'--network=host ' \
+					f'-v /:/hostfs:ro ' \
+					f'{self._get_args()} ' \
+					f'{self._get_args_communication()} ' \
+					f'{self._get_envs()} ' \
+					f'{docker_params} ' \
+					f'{args.docker_image} ' \
+					f'storiksd --log_level={args.log_level}'
+
+		log.debug('Start command: ' + cmd)
+		self._execute(cmd)
+
+		if not args.foreground:
+			log.info('storiks container started!')
+			time.sleep(1)
+			if not self._get_container_status():
+				raise Exception('storiks container failed. Use "--foreground" to see more details.')
+			print(f'Please access the jupyter-notebook url: {self._get_notebook_url()}')
+
+	_envs_ = None
+	_preserve_envs_ = None  # preserve environment variable inside container
+	def _register_env(self, key, value=None):
+		if self._envs_ is None:
+			self._envs_ = dict()
+		if self._preserve_envs_ is None:
+			self._preserve_envs_ = []
+		if value is not None:
+			self._envs_[key] = value
+		self._preserve_envs_.append(key)
+
+	def _get_envs(self):
+		ret = []
+		for k, v in self._envs_.items():
+			ret.append(f'-e {k}="{v}"')
+		ret.append(f'-e STORIKS_PRESERVE_ENVS="{",".join(self._preserve_envs_)}"')
+		return ' '.join(ret)
+
+	def _get_args(self):
+		ret = []
+
+		self._register_env('LD_LIBRARY_PATH')
+		self._register_env('PYTHONPATH')
+		self._register_env('YCSB_PATH')
+		self._register_env('PERFMON_CHROOT', '/hostfs')
+		self._register_env('PERFMON_IOSTAT', 'false')
+		self._register_env('STORIKS_DOCKER_IMAGE', args.docker_image)
+
+		docker_path = self._get_cmd_output('which docker')
+		ret.append(f'-v "{docker_path}":/usr/bin/docker:ro')
+		ret.append(f'-v "{self._test_dir_abs("/var/lib/docker")}/":/var/lib/docker:ro')
+		ret.append(f'-v /var/run/docker.sock:/var/run/docker.sock:rw')
+
+		data_dir = self._test_dir_abs(args.data_dir)
+		ret.append(f'-v "{data_dir}":/workdata:rw')
+		self._register_env('STORIKS_DATA_DIR', data_dir)
+		device = self._get_device(data_dir)
+		self._register_env('STORIKS_DATA_DEV', device)
+		self._register_env('PERFMON_DEVICE', device)
+
+		output_dir = self._test_dir_abs(args.output_dir)
+		ret.append(f'-v "{output_dir}":/output:rw')
+		self._register_env('STORIKS_OUTPUT_DIR', output_dir)
+
+		self._register_env('STORIKS_RUN_PERFMON', 'true' if args.perfmon else 'false')
+
+		for e in args.docker_env:
+			aux = e.split('=')
+			if len(aux) >= 2:
+				k = aux[0].strip()
+				v = '='.join(aux[1:])
+				if len(k) > 0 and len(v) > 0:
+					self._register_env(aux[0], '='.join(aux[1:]))
+					continue
+			log.warning(f'invalid docker_env: {e}')
+
+		return ' '.join(ret)
+
+	def _get_args_groups(self):
+		ret = []
+		self._register_env('STORIKS_USER', getpass.getuser())
+		self._register_env('STORIKS_USER_UID', os.getuid())
+		self._register_env('STORIKS_USER_GID', os.getgid())
+		self._register_env('STORIKS_USER_IDS', self._get_cmd_output("id"))
+		for g in os.getgroups():
+			ret.append(f'--group-add {g}')
+		return ' '.join(ret)
+
+	def _get_device(self, dirname):
+		if args.data_dev is not None:
+			os.stat(f'/dev/{args.data_dev}')
+			return args.data_dev
+		else:
+			mp = self._get_cmd_output(f'df "{dirname}" |tail -n 1')
+			r = re.findall(r'/dev/([^ ]+)', mp)
+			log.debug('_get_device: r = ' + str(r))
+			if len(r) > 0:
+				for p in [r'([sv]d[a-z])[0-9]*', r'(nvme[0-9]+n[0-9]+)(p[0-9]+)?']:
+					r2 = re.findall(p, r[0])
+					log.debug('_get_device: r2 = ' + str(r2))
+					if len(r2) > 0:
+						while isinstance(r2, list) or isinstance(r2, tuple):
+							r2 = r2[0]
+						return r2
+		raise Exception(f'failed to determine the device name of directory "{dirname}"')
+
+	def _get_args_communication(self) -> str:
+		ret = []
+		dirname = args.communication_dir
+		if not os.path.isdir(dirname):
+			if not self._execute(f'mkdir -p "{dirname}"', False):
+				raise Exception(f'failed to create the communication directory: {dirname}')
+
+		ret.append(f'-v "{dirname}":"{dirname}":rw')
+		self._register_env('STORIKS_COMMUNICATION_DIR', dirname)
+		return ' '.join(ret)
+
+Subcommand.add_subclass(Start)
+
+
+# =============================================================================
+class Stop (Subcommand):
+	_name_ = 'stop'
+	@classmethod
+	def register(cls, subparser):
+		parser2 = subparser.add_parser('stop', help='Stop the main container.')
+		return parser2
+
+	def __init__(self):
+		log.info('Stopping storiks container...')
+		self._execute(f'docker stop storiks')
+
+Subcommand.add_subclass(Stop)
+
+
+# =============================================================================
+class Status (Subcommand):
+	_name_ = 'status'
+	@classmethod
+	def register(cls, subparser):
+		parser2 = subparser.add_parser('status', help='Return the status of storiks framework.')
+		parser2.add_argument('--environment',
+							 default=False, action='store_true',
+							 help='Show internal environment variables.')
+		parser2.add_argument('--volumes',
+							 default=False, action='store_true',
+							 help='Show mapped volumes.')
+		parser2.add_argument('--all',
+							 default=False, action='store_true',
+							 help='Show all.')
+		return parser2
+
+	def __init__(self):
+		metadata = self._get_container_metadata()
+		if metadata is not None:
+			print(f'Status: {self._get_recursive(metadata, "State", "Status")}, '
+				  f'StartedAt: {self._get_recursive(metadata, "State", "StartedAt")}')
+			print(f'\njupyter-notebook url: {self._get_notebook_url()}')
+
+			if args.volumes or args.all:
+				mounts = metadata.get('Mounts')
+				print('\nMapped volumes:')
+				if mounts is not None:
+					for m in mounts:
+						print(f'\t{m.get("Source")} -> {m.get("Destination")}')
+
+			if args.environment or args.all:
+				env = self._get_container_env()
+				print('\nInternal environment variables:')
+				for k, v in env.items():
+					print(f'\t{k}={v}')
+			print('')
+		else:
+			log.error('storiks is not running')
+
+Subcommand.add_subclass(Status)
+
+
+# =============================================================================
+class Terminal (Subcommand):
+	_name_ = 'terminal'
+	@classmethod
+	def register(cls, subparser):
+		parser2 = subparser.add_parser('terminal', help='Open a bash terminal')
+		parser2.add_argument('--root',
+							 default=False, action='store_true',
+							 help='Access the container terminal as root.')
+		return parser2
+
+	def __init__(self):
+		if args.root:
+			self._execute(f'docker exec -ti storiks bash')
+		else:
+			self._execute(f'docker exec --user {os.getuid()}:{os.getgid()} -ti storiks bash')
+
+Subcommand.add_subclass(Terminal)
+
+
+# =============================================================================
+class Open (Subcommand):
+	_name_ = 'open'
+	@classmethod
+	def register(cls, subparser):
+		parser2 = subparser.add_parser('open', help='Open the jupyter-notebook interface.')
+		return parser2
+
+	def __init__(self):
+		url = self._get_notebook_url()
+		log.info(f'Open jupyter-notebook url: {url}')
+		self._execute(f'xdg-open \'{url}\'')
+
+Subcommand.add_subclass(Open)
+
+
+# =============================================================================
+def main() -> int:
+	try:
+		if args.version:
+			config.print_version()
+		elif args.version_h:
+			config.print_version_h()
+		elif args.version_py:
+			config.print_version_py()
+		elif Subcommand.subcommand_by_name(args.subcommand) is not None:
+			Subcommand.subcommand_by_name(args.subcommand)()
+		else:
+			raise Exception('unknown action')
+
+	except Exception as e:
+		if log.level == logging.DEBUG:
+			exc_type, exc_value, exc_traceback = sys.exc_info()
+			sys.stderr.write('main exception:\n' +
+			                 ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback)) + '\n')
+		else:
+			sys.stderr.write('ERROR: ' + str(e) + '\n')
+		return 1
+	return 0
+
+
+# =============================================================================
+if __name__ == '__main__':
+	exit(main())

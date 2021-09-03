@@ -77,14 +77,36 @@ void LogLevel::set(const string& name) {
 #undef __CLASS__
 #define __CLASS__ "TmpDir::"
 
+static int tmpdir_runcount = 1;
 static std::atomic<int> tmpdir_filecount = 1;
 
 TmpDir::TmpDir() {
 	DEBUG_MSG("constructor");
-	base = std::filesystem::temp_directory_path() / ( string("rocksdb_test-") + std::to_string(getpid()) );
-	DEBUG_MSG("base directory: {}", base.c_str());
-	if (! std::filesystem::create_directories(base) ){
-		throw runtime_error(format("failed to create temporary directory: {}", base.c_str()).c_str());
+
+	auto envbase = getenv("STORIKS_COMMUNICATION_DIR");
+	DEBUG_MSG("envbase = {}", envbase);
+	auto prebase = (envbase != nullptr) ? std::filesystem::path(envbase) : std::filesystem::temp_directory_path();
+	DEBUG_MSG("prebase = {}", prebase.c_str());
+	if (! std::filesystem::is_directory(prebase)) {
+		throw runtime_error(format("invalid communication directory for experiments: {}", prebase.c_str()).c_str());
+	}
+
+	while (true) {
+		base = prebase / ( string("run-") + std::to_string(tmpdir_runcount++) );
+		DEBUG_MSG("base = {}", base.c_str());
+
+		if ( std::filesystem::create_directories(base) ) {
+			spdlog::info("communication directory: {}", base.c_str());
+			break;
+		} else {
+			if (!std::filesystem::exists(base))
+				throw runtime_error(format("impossible to criate a subdirectory in {}", prebase.c_str()).c_str());
+			spdlog::warn("failed to create the communication directory {}. Try again.", base.c_str());
+		}
+
+		if (tmpdir_runcount > 1024) {
+			throw runtime_error(format("failed to create the experiment temporary directory in {}", prebase.c_str()).c_str());
+		}
 	}
 	DEBUG_MSG("constructor finished");
 }

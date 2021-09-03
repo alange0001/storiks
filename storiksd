@@ -1,0 +1,382 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+@author: Adriano Lange <alange0001@gmail.com>
+
+Copyright (c) 2020-present, Adriano Lange.  All rights reserved.
+This source code is licensed under both the GPLv2 (found in the
+LICENSE file in the root directory) and Apache 2.0 License
+(found in the LICENSE.Apache file in the root directory).
+"""
+
+import os
+import re
+import subprocess
+import sys
+import signal
+import psutil
+import time
+import threading
+import argparse
+import traceback
+import shutil
+import json
+import storiks
+from storiks.util import coalesce, getenv_default, get_recursive, env_as_bool
+
+# =============================================================================
+import logging
+log = logging.getLogger('storiksd')
+log.setLevel(logging.INFO)
+
+# =============================================================================
+args = None
+
+# =============================================================================
+class CommunicationFiles:
+	basedir = os.getenv('STORIKS_COMMUNICATION_DIR')
+	id = f'{basedir}/id'
+	notebook_url = f'{basedir}/{storiks.version.NOTEBOOK_URL_FILE}'
+
+	@classmethod
+	def wipe(cls):
+		if cls.basedir is None or not os.path.isdir(cls.basedir):
+			raise Exception(f'invalid communication directory: {cls.basedir}')
+
+		for f in [
+			cls.id,
+			cls.notebook_url,
+		]:
+			if os.path.isfile(f):
+				log.info(f'removing old file: {f}')
+				os.remove(f)
+
+# =============================================================================
+class Program:
+	def get_args(self):
+		_function_ = 'Program.get_args()'
+		parser = argparse.ArgumentParser(
+			description="Storiks Daemon")
+		parser.add_argument('-l', '--log_level', type=str,
+							default=getenv_default('STORIKS_LOG_LEVEL', 'INFO'),
+							choices=['debug', 'DEBUG', 'info', 'INFO'],
+							help='Log level.')
+
+		args = parser.parse_args()
+
+		log_h = logging.StreamHandler()
+		log_h.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s: %(message)s'))
+		# log_h.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+		log.addHandler(log_h)
+		log.setLevel(getattr(logging, args.log_level.upper()))
+
+		log.debug(f'{_function_}: Args: {str(args)}')
+		return args
+
+	def main(self) -> int:
+		_function_ = 'Program.main()'
+		global args
+
+		for i in ('SIGINT', 'SIGTERM'):
+			signal.signal(getattr(signal, i),
+						  lambda signumber, stack, signame=i: signal_handler(signame,  signumber, stack))
+
+		try:
+			log.info(f'storiksd version {storiks.version.PROJECT_VERSION}')
+			args = self.get_args()
+			log.info(f'\t{os.environ}')
+
+			CommunicationFiles.wipe()
+			self.set_basic_files()
+			self.create_user_groups()
+			self.set_etc_profile()
+			nbserver = NotebookServer()
+			perfmon = Performancemonitor() if env_as_bool('STORIKS_RUN_PERFMON') else None
+
+			time.sleep(1)
+			while True:
+				if perfmon is not None and perfmon.check_status() == 0:
+					log.error(f'performancemonitor is not running')
+				if nbserver.check_status() == 0:
+					raise Exception(f'jupyter-notebook is not running')
+				time.sleep(5)
+
+		except Exception as e:
+			if log.level == logging.DEBUG:
+				exc_type, exc_value, exc_traceback = sys.exc_info()
+				sys.stderr.write('main exception:\n' +
+								 ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback)) + '\n')
+			else:
+				sys.stderr.write(str(e) + '\n')
+			return 1
+		return 0
+
+	def set_basic_files(self):
+		_function_ = 'Program.set_basic_files()'
+		log.debug(_function_)
+		metadata = self.get_container_metadata()
+		id = get_recursive(metadata, 'Id')
+		if id is None or not isinstance(id, str):
+			raise Exception(f'failed to get container Id: {id}')
+		log.info(f'container id: {id}')
+		with open(CommunicationFiles.id, 'wt') as f:
+			f.write(f'{id}\n')
+
+	def get_container_metadata(self, name='storiks'):
+		_function_ = 'Program.get_container_metadata()'
+		log.debug(_function_)
+		st, out = subprocess.getstatusoutput(f'docker inspect "{name}"')
+		if st == 0:
+			j = json.loads(out)
+			if len(j) > 0:
+				return j[0]
+		return None
+
+	def set_etc_profile(self):
+		_function_ = 'Program.set_etc_profile()'
+		log.debug(_function_)
+		envlist = os.getenv('STORIKS_PRESERVE_ENVS')
+		if envlist is not None:
+			log.info('saving main environment variables in /etc/profile.d/storiks.sh')
+			envlist = envlist.split(',')
+			with open('/etc/profile.d/storiks.sh', 'wt') as f:
+				storiks_path = os.getenv('STORIKS_PATH')
+				if storiks_path is not None:
+					f.write(f'export PATH="{storiks_path}:$PATH"')
+				for e in envlist:
+					v = os.getenv(e)
+					if v is not None:
+						f.write(f'export {e}="{v}"\n')
+		else:
+			log.warning('undefined environment variable STORIKS_PRESERVE_ENVS')
+
+	def create_user_groups(self):
+		_function_ = 'Program.create_user_groups()'
+
+		def test_create_group(gid, groupname):
+			if not execute(f'getent group "{groupname}" >/dev/null', False, False):
+				log.info(f'creating group {groupname}, gid={gid}')
+				execute(f'groupadd -g {gid} "{groupname}"', False)
+
+		id_line = os.getenv('STORIKS_USER_IDS')
+		log.debug(f'{_function_}: STORIKS_USER_IDS = {id_line}')
+		if id_line is None:
+			log.warning('undefined environment variable STORIKS_USER_IDS')
+			return
+		log.debug(f'{_function_}: STORIKS_USER_IDS = {id_line}')
+
+		r = re.findall(r'gid=([0-9]+)\((\w+)\)', id_line)
+		log.debug(f'{_function_}: r = {r}')
+		gid = 0
+		if len(r) > 0:
+			gid = r[0][0]
+			test_create_group(r[0][0], r[0][1])
+
+		r = re.findall(r'groups=(.*)', id_line)
+		log.debug(f'{_function_}: r = {r}')
+		group_list = []
+		if len(r) > 0:
+			for gaux in r[0].split(','):
+				r2 = re.findall(r'([0-9]+)\(([^\)]+)\)', gaux)
+				log.debug(f'{_function_}: gaux = {gaux}; r2 = {r2}')
+				if len(r2) > 0:
+					group_list.append(r2[0][0])
+					test_create_group(r2[0][0], r2[0][1])
+
+		r = re.findall(r'uid=([0-9]+)\((\w+)\)', id_line)
+		log.debug(f'{_function_}: r = {r}')
+		if len(r) > 0:
+			uid, username = r[0][0], r[0][1]
+			if not execute(f'getent passwd "{username}" >/dev/null', False, False):
+				additional_groups = f'-G {",".join(group_list)}' if len(group_list) > 0 else ''
+				log.info(f'creating user {username}, uid={uid}')
+				execute(f'useradd -u {uid} -g {gid} {additional_groups} -d /home/user '
+						f'--shell /bin/bash "{username}"', False)
+
+# =============================================================================
+class NotebookServer:
+	_process = None
+	_thread_stdout = None
+	_thread_stderr = None
+	_url = None
+	_url_filename_guest = None
+
+	def __init__(self):
+		_function_ = 'NotebookServer'
+		log.debug(f'{_function_}: constructor')
+		if os.getenv('STORIKS_USER') is None:
+			raise Exception(f'failed to start jupyter-notebook. Environment variable STORIKS_USER not defined.')
+
+		self._copy_examples()
+
+		cmd = [
+			'su', '-l', os.getenv('STORIKS_USER'), '-c',
+			'cd /output && /usr/local/conda/bin/jupyter-notebook --ip=\'*\' --no-browser'
+		]
+		log.info(f'{_function_}: starting jupyter-notebook')
+		self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		time.sleep(0.3)
+
+		self._thread_stdout = threading.Thread(name='NotebookServer.stdout', target=lambda: self._handle_stdout())
+		self._thread_stdout.daemon = True
+		self._thread_stdout.start()
+		self._thread_stderr = threading.Thread(name='NotebookServer.stderr', target=lambda: self._handle_stderr())
+		self._thread_stderr.daemon = True
+		self._thread_stderr.start()
+
+	def __del__(self):
+		self._process.kill()
+
+	def check_status(self):
+		_function_ = 'NotebookServer.check_status()'
+		try:
+			st = self._process.wait(0)
+			if st != 0:
+				log.error(f'NotebookServer exit code {st}')
+			return st
+		except subprocess.TimeoutExpired:
+			return None
+		except Exception as e:
+			log.error(f'{_function_}: unexpected exception: {str(e)}')
+			return -999
+
+	def _copy_examples(self):
+		_function_ = 'NotebookServer._copy_examples()'
+		src = '/opt/storiks/examples'
+		dst = '/output'
+		try:
+			if not os.path.isdir(src):
+				raise Exception(f'invalid source directory: {src}')
+			if not os.path.isdir(dst):
+				raise Exception(f'invalid destination directory: {dst}')
+			for f in os.listdir(src):
+				fs = os.path.join(src, f)
+				fd = os.path.join(dst, f)
+				if os.path.isfile(fs) and not os.path.exists(fd):
+					log.info(f'copy example file: {f}')
+					shutil.copy(fs, fd)
+					shutil.chown(fd, os.getenv('STORIKS_USER'))
+		except Exception as e:
+			log.error(f'Failed to copy notebook examples: {str(e)}')
+
+	def _handle_stdout(self):
+		_function_ = 'NotebookServer._handle_stdout()'
+		log.debug(f'{_function_}')
+		while self._process.returncode is None and self._process.stdout.readable():
+			line = self._process.stdout.readline().decode()
+			if len(line) > 0:
+				sys.stdout.write('NotebookServer: ' + line)
+
+	def _handle_stderr(self):
+		_function_ = 'NotebookServer._handle_stderr()'
+		log.debug(f'{_function_}')
+		while self._process.returncode is None and self._process.stderr.readable():
+			line = self._process.stderr.readline().decode()
+			if len(line) > 0:
+				sys.stderr.write('NotebookServer: ' + line)
+			if self._url is None:
+				r = re.findall(r'http://.+/\?token=.*', line)
+				if len(r) > 0:
+					log.debug(f'{_function_}: r = {r}')
+					self._url = r[0]
+					with open(CommunicationFiles.notebook_url, 'wt') as f:
+						f.write(f'{self._url}\n')
+
+# =============================================================================
+class Performancemonitor:
+	_process = None
+	_thread_stdout = None
+	_thread_stderr = None
+
+	def __init__(self):
+		_function_ = 'Performancemonitor'
+		log.debug(f'{_function_}: constructor')
+
+		cmd = ['performancemonitor']
+		log.info(f'{_function_}: starting performancemonitor')
+		self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		time.sleep(0.3)
+
+		self._thread_stdout = threading.Thread(name='Performancemonitor.stdout', target=lambda: self._handle_stdout())
+		self._thread_stdout.daemon = True
+		self._thread_stdout.start()
+		self._thread_stderr = threading.Thread(name='Performancemonitor.stderr', target=lambda: self._handle_stderr())
+		self._thread_stderr.daemon = True
+		self._thread_stderr.start()
+
+	def __del__(self):
+		self._process.kill()
+
+	def check_status(self):
+		_function_ = 'Performancemonitor.check_status()'
+		try:
+			st = self._process.wait(0)
+			if st != 0:
+				log.error(f'performancemonitor exit code {st}')
+			return st
+		except subprocess.TimeoutExpired:
+			return None
+		except Exception as e:
+			log.error(f'{_function_}: unexpected exception: {str(e)}')
+			return -999
+
+	def _handle_stdout(self):
+		_function_ = 'Performancemonitor._handle_stdout()'
+		log.debug(f'{_function_}')
+		while self._process.returncode is None and self._process.stdout.readable():
+			line = self._process.stdout.readline().decode()
+			if len(line) > 0:
+				sys.stdout.write('Performancemonitor: ' + line)
+
+	def _handle_stderr(self):
+		_function_ = 'Performancemonitor._handle_stderr()'
+		log.debug(f'{_function_}')
+		while self._process.returncode is None and self._process.stderr.readable():
+			line = self._process.stderr.readline().decode()
+			if len(line) > 0:
+				sys.stderr.write('Performancemonitor: ' + line)
+
+# =============================================================================
+def execute(cmd: str, raise_except=True, show_error=True) -> bool:
+	_function_ = 'execute()'
+	log.debug(f'{_function_}: command: {cmd}')
+	r = os.system(cmd)
+	log.debug(f'{_function_}: exit code = {r}')
+	if r != 0:
+		if raise_except:
+			raise Exception(f'command returned error code {r}: {cmd}')
+		else:
+			if show_error:
+				log.error(f'command returned error code {r}: {cmd}')
+			return False
+	return True
+
+# =============================================================================
+def signal_handler(signame, signumber, stack):
+	def kill_process(p_):
+		try:
+			log.warning(f'Child process {p_.pid} is still running. Sending signal {signame}.')
+			p_.send_signal(signumber)
+		except Exception as e:
+			sys.stderr.write(f'signal_handler exception (kill_process): {str(e)}\n')
+
+	try:
+		log.info(f'signal {signame} received')
+		for p in psutil.Process().children(recursive=False):
+			kill_process(p)
+		for i in range(0, 20):
+			time.sleep(0.2)
+			if len(psutil.Process().children(recursive=True)) == 0:
+				break
+		for p in psutil.Process().children(recursive=True):
+			kill_process(p)
+		exit(0)
+
+	except Exception as e:
+		sys.stderr.write(f'signal_handler exception: {str(e)}\n')
+		exit(1)
+
+
+# =============================================================================
+if __name__ == '__main__':
+	exit(Program().main())

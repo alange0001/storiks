@@ -16,6 +16,7 @@ using std::string;
 using std::vector;
 using std::function;
 
+
 ////////////////////////////////////////////////////////////////////////////////////
 
 /*_f(ARG_name, ARG_type, ARG_flag_type, ARG_flag_default, ARG_help, ARG_condition, ARG_set_event)*/
@@ -91,7 +92,7 @@ using std::function;
 		true,                                                     \
 		nullptr)                                                  \
 	_f(docker_image, string, DEFINE_string,                       \
-		"alange0001/rocksdb_test:" ROCKSDB_TEST_VERSION,          \
+		getenv_default("STORIKS_DOCKER_IMAGE", DOCKER_IMAGE),     \
 		"docker image used for each container",                   \
 		value.length() > 0,                                       \
 		nullptr)                                                  \
@@ -111,12 +112,12 @@ using std::function;
 		true,                                                     \
 		nullptr)                                                  \
 	_f(perfmon, bool, DEFINE_bool,                                \
-		false,                                                    \
+		getenv_default_bool("STORIKS_RUN_PERFMON", false),        \
 		"Connect to performancemonitor",                          \
 		true,                                                     \
 		nullptr)                                                  \
 	_f(perfmon_port, uint32_t, DEFINE_uint32,                     \
-		18087,                                                    \
+		getenv_default("PERFMON_PORT", 18087),                    \
 		"performancemonitor port",                                \
 		value > 0,                                                \
 		nullptr)

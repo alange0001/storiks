@@ -50,6 +50,31 @@ using fmt::format;
 	DEFINE_validator(ARG_name, &validate_##ARG_name);
 ////////////////////////////////////////////////////////////////////////////////////
 
+static string getenv_default(const char* name, const string& default_value) {
+	auto env_val = getenv(name);
+	if (env_val != nullptr)
+		return env_val;
+	return default_value;
+}
+
+static uint32_t getenv_default(const char* name, const uint32_t default_value) {
+	auto env_val = getenv(name);
+	if (env_val != nullptr) {
+		uint32_t aux = static_cast<uint32_t>(std::atol(env_val));
+		return aux;
+	}
+	return default_value;
+}
+
+static bool getenv_default_bool(const char* name, const bool default_value) {
+	auto env_val = getenv(name);
+	if (env_val != nullptr) {
+		string aux(env_val);
+		return (aux == "1" || aux == "t" || aux == "true" || aux == "y" || aux == "yes");
+	}
+	return default_value;
+}
+
 static void setLogLevel(const string& value) {
 	loglevel.set(value);
 }

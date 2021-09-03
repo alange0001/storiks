@@ -1,10 +1,10 @@
-bazel-*
-vars.bzl
 .cproject
 .idea
 .project
 .settings
 3rd-party
 build
-version.h
-version.h.new
+src/version.h
+src/version.h.new
+__pycache__
+docker/opt

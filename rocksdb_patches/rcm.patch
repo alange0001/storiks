@@ -6,7 +6,7 @@ index 9d82a0a..047aa20 100644
  #include "test_util/sync_point.h"
  #include "util/rate_limiter.h"
  
-+#include "rocksdb_test/rcm_impl.h"
++#include "storiks/rcm_impl.h"
 +
  namespace ROCKSDB_NAMESPACE {
  Options SanitizeOptions(const std::string& dbname, const Options& src) {
@@ -29,7 +29,7 @@ index 840e1b4..f3e2200 100644
  #include "rocksdb/types.h"
  #include "rocksdb/version.h"
  
-+#include "rocksdb_test/rcm.h"
++#include "storiks/rcm.h"
 +
  #ifdef _WIN32
  // Windows API macro interference

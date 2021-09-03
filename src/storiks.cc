@@ -862,7 +862,7 @@ class Program {
 
 	int main(int argc, char** argv) noexcept {
 		DEBUG_MSG("initialized");
-		spdlog::info("rocksdb_test version: " ROCKSDB_TEST_VERSION);
+		spdlog::info(PROJECT_NAME " version: " PROJECT_VERSION);
 		try {
 			args.reset(new Args(argc, argv));
 			clock.reset(new Clock());
