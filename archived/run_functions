@@ -1,0 +1,262 @@
+#!/bin/bash
+#
+# Copyright (c) 2020-present, Adriano Lange.  All rights reserved.
+# This source code is licensed under both the GPLv2 (found in the
+# LICENSE.GPLv2 file in the root directory) and Apache 2.0 License
+# (found in the LICENSE.Apache file in the root directory).
+#
+
+source run_environment
+
+[ "$FAILED" == 1 ] && exit 1
+
+BACKUP_DB_BENCH="$DIR_BACKUP"/rocksdb.tar
+BACKUP_DB_YCSB="$DIR_BACKUP"/ycsb.tar
+
+RESTORE_DB=${RESTORE_DB:-0}
+
+function send_message() {
+	[ "$SEND_MESSAGE" == 0 ] || telegram-send "$@"
+}
+
+function remove_dbs {
+	for i in "$DIR_DB_BENCH" "$DIR_DB_BENCH"_* "$DIR_DB_YCSB" "$DIR_DB_YCSB"_*; do
+		echo "removing database dir: $i" >&2
+		rm -fr "$i"
+	done
+}
+
+function run_at3() {
+	output_dir="$1"
+	if [ -z "$output_dir" ]; then
+		echo "output_dir not defined"
+		return
+	fi
+
+	t=1
+
+	at_script="${t}:wait=false"
+	for wr in 0 0.1 0.2 0.3 0.5 0.7 1; do
+		at_script="$at_script,${t}:write_ratio=${wr}"
+		for rr in 0 0.5 1; do
+			at_script="$at_script,${t}:random_ratio=${rr}"
+			for bs in 4 8 128 256 512; do
+				at_script="$at_script,${t}:block_size=${bs}"
+				t=$((t + 35))
+			done
+		done
+	done
+	at_script="$at_script,$((t + 5)):stop"
+	for n in 1 6 2 3 4 5; do
+		at_files="$(for ((i=0; i<$n; i++)); do echo "$i"; done |paste -sd'#')"
+		echo $at_files
+		echo $at_script
+		rocksdb_test \
+			--docker_params="$DOCKER_PARAMS" \
+			--log_level="info" \
+			--duration="$((t / 60 + 1))" \
+			--warm_period="0" \
+			--stats_interval="5" \
+			--io_device="nvme0n1" \
+			--num_at="$n" \
+			--at_dir="$DIR_AT" \
+			--at_file="$at_files" \
+			--at_params="--wait --flush_blocks=0" \
+			--at_script="$at_script" >"$output_dir/at_files-$n.out"
+	done
+}
+
+function run_at3_rww() {
+	output_dir="$1"
+	if [ -z "$output_dir" ]; then
+		echo "output_dir not defined"
+		return
+	fi
+
+	n=4
+	t=1
+
+	ats[0]="1:wait=false"
+	for ((i=1; i<$n; i++)); do
+		t=$((t + 30))
+		ats[$i]="${t}:wait=false"
+	done
+	for ((i=1; i<$n; i++)); do
+		for wr in 0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1; do
+			t=$((t + 30))
+			ats[$i]="${ats[$i]},${t}:write_ratio=${wr}"
+		done
+	done
+	ats[0]="${ats[0]},$((t + 30)):stop"
+	at_script="$(echo ${ats[*]} |tr " " ";")"
+
+	at_files="$(for ((i=0; i<$n; i++)); do echo "$i"; done |paste -sd'#')"
+	echo $at_files
+	echo $at_script
+	#return
+	for bs in 512 4 8 128 256; do
+		rocksdb_test \
+			--docker_params="$DOCKER_PARAMS" \
+			--log_level="info" \
+			--duration="$((t / 60 + 10))" \
+			--warm_period="0" \
+			--stats_interval="5" \
+			--io_device="nvme0n1" \
+			--num_at="$n" \
+			--at_dir="$DIR_AT" \
+			--at_file="$at_files" \
+			--at_params="--wait --flush_blocks=0 --block_size=${bs}" \
+			--at_script="$at_script" >"$output_dir/jobs${n}_rww_bs${bs}_cache.out"
+	done
+}
+
+function run_generic() {
+	OLD_IFS=${IFS}
+	                                                   echo "" >&2
+	                                                   echo "===================================" >&2
+	OUTPUT=${OUTPUT:-/dev/stdout}                    ; echo "OUTPUT            = $OUTPUT" >&2
+	TEST_COMMANDS=${TEST_COMMANDS:-0}                ; echo "TEST_COMMANDS     = $TEST_COMMANDS" >&2
+	DOCKER_IMAGE=${DOCKER_IMAGE:-alange0001/rocksdb_test:1} ; echo "DOCKER_IMAGE      = $DOCKER_IMAGE" >&2
+	                                                   echo "DOCKER_PARAMS     = $DOCKER_PARAMS" >&2
+	DURATION=${DURATION:-0}                          ; echo "DURATION          = $DURATION" >&2
+	WARM_PERIOD=${WARM_PERIOD:-0}                    ; echo "WARM_PERIOD       = $WARM_PERIOD" >&2
+	                                                   echo "IO_DEVICE         = $IO_DEVICE" >&2
+	                                                   echo "ROCKSDB_CONFIG    = $ROCKSDB_CONFIG" >&2
+	# DB_BENCH params
+	NUM_DBS=${NUM_DBS:-0}                            ; echo "NUM_DBS           = $NUM_DBS" >&2
+	DB_KEYS=${DB_KEYS:-500000000}                    ; echo "DB_KEYS           = $DB_KEYS" >&2
+	DB_PATH=`for ((i=1;i<=$NUM_DBS;i++)); do echo "$DIR_WORK/rocksdb_$i"; done |paste -sd'#'`
+	                                                   echo "DB_PATH           = $DB_PATH" >&2
+	DB_WORKLOAD=${DB_WORKLOAD:-readrandomwriterandom}; echo "DB_WORKLOAD       = $DB_WORKLOAD" >&2
+	DB_THREADS=${DB_THREADS:-1}                      ; echo "DB_THREADS        = $DB_THREADS" >&2
+	DB_CACHE_SIZE=${DB_CACHE_SIZE:-536870912}        ; echo "DB_CACHE_SIZE     = $DB_CACHE_SIZE" >&2
+	# YCSB params
+	NUM_YDBS=${NUM_YDBS:-0}                          ; echo "NUM_YDBS          = $NUM_YDBS" >&2
+	YDB_KEYS=${YDB_KEYS:-50000000}                   ; echo "YDB_KEYS          = $YDB_KEYS" >&2
+	YDB_PATH=`for ((i=1;i<=$NUM_YDBS;i++)); do echo "$DIR_WORK/rocksdb_ycsb_$i"; done |paste -sd'#'`
+	                                                   echo "YDB_PATH          = $YDB_PATH" >&2
+	YDB_WORKLOAD=${YDB_WORKLOAD:-workloadb}          ; echo "YDB_WORKLOAD      = $YDB_WORKLOAD" >&2
+	YDB_THREADS=${YDB_THREADS:-1}                    ; echo "YDB_THREADS       = $YDB_THREADS" >&2
+	YDB_SLEEP=${YDB_SLEEP:-0}                        ; echo "YDB_SLEEP         = $YDB_SLEEP" >&2
+	# access_time3 params
+	NUM_AT=${NUM_AT:-0}                              ; echo "NUM_AT            = $NUM_AT" >&2
+	AT_FILES="$(for ((i=0; i<$NUM_AT; i++)); do echo "$i"; done |paste -sd'#')"
+	                                                   echo "AT_FILES          = $AT_FILES" >&2
+	AT_BLOCK_SIZE=${AT_BLOCK_SIZE:-512}              ; echo "AT_BLOCK_SIZE     = $AT_BLOCK_SIZE" >&2
+	                                                   echo "AT_PARAMS         = $AT_PARAMS" >&2
+	                                                   echo "AT_SCRIPT         = $AT_SCRIPT" >&2
+
+	test_cmd=
+	if [ "$TEST_COMMANDS" == 1 ]; then
+		test_cmd="echo COMMAND: "
+		OUTPUT=/dev/stdout
+	fi
+
+	echo "RESTORE_DBS       = $RESTORE_DBS" >&2
+	if [ "$RESTORE_DBS" == 1 ]; then
+		echo "OK, restoring DBs" >&2
+		$test_cmd remove_dbs
+		IFS="#"
+		for i in $DB_PATH; do
+			echo "Restore db_bench database: $i" >&2
+			$test_cmd mkdir "$i"
+			$test_cmd tar -xf "$BACKUP_DB_BENCH" -C "$i" || exit 1
+			$test_cmd test_dir "$i"
+		done
+		for i in $YDB_PATH; do
+			echo "Restore ycsb database: $i" >&2
+			$test_cmd mkdir "$i"
+			$test_cmd tar -xf "$BACKUP_DB_YCSB" -C "$i" || exit 1
+			$test_cmd test_dir "$i"
+		done
+		IFS="$OLD_IFS"
+	fi
+
+	echo "PARAMS            = $PARAMS" >&2
+
+	$test_cmd send_message "fstrim on directory $DIR_WORK."
+	$test_cmd sudo fstrim "$DIR_WORK"
+
+	echo "Run rocksdb_test ..." >&2
+	$test_cmd send_message "Initiating experiment $(basename $OUTPUT)."
+	$test_cmd build/rocksdb_test \
+		--docker_image="$DOCKER_IMAGE" \
+		--docker_params="$DOCKER_PARAMS" \
+		--log_level="info" \
+		--stats_interval=5 \
+		--duration="$DURATION" \
+		--warm_period="$WARM_PERIOD" \
+		--io_device="$IO_DEVICE" \
+		--rocksdb_config_file="$ROCKSDB_CONFIG" \
+		--num_dbs="$NUM_DBS" \
+		--db_num_keys="$DB_KEYS" \
+		--db_path="$DB_PATH" \
+		--db_benchmark="$DB_WORKLOAD" \
+		--db_threads="$DB_THREADS" \
+		--db_cache_size="$DB_CACHE_SIZE" \
+		--num_ydbs="$NUM_YDBS" \
+		--ydb_num_keys="$YDB_KEYS" \
+		--ydb_path="$YDB_PATH" \
+		--ydb_workload="/workspace/YCSB/workloads/$YDB_WORKLOAD" \
+		--ydb_threads="$YDB_THREADS" \
+		--ydb_sleep="$YDB_SLEEP" \
+		--num_at="$NUM_AT" \
+		--at_dir="$DIR_AT" \
+		--at_file="$AT_FILES" \
+		--at_block_size="$AT_BLOCK_SIZE" \
+		--at_params="$AT_PARAMS" \
+		--at_script="$AT_SCRIPT" \
+		$PARAMS > $OUTPUT
+
+	exit_code=$?
+	$test_cmd send_message "Experiment $(basename $OUTPUT) finished. Exit code $exit_code."
+}
+
+function run_fio() {
+	                                                   echo "" >&2
+	                                                   echo "===================================" >&2
+	OUTPUT=${OUTPUT:-/dev/stdout}                    ; echo "OUTPUT            = $OUTPUT" >&2
+	RUNTIME=${RUNTIME:-90}                           ; echo "RUNTIME           = $RUNTIME" >&2
+	DIRECTORY=${DIRECTORY:-$DIR_AT}                  ; echo "DIRECTORY         = $DIRECTORY" >&2
+	FILENAME=${FILENAME:-testfile.dat}               ; echo "FILENAME          = $FILENAME" >&2
+	FILESIZE=${FILESIZE:-20GiB}                      ; echo "FILESIZE          = $FILESIZE" >&2
+	IODEPTH=${IODEPTH:-1}                            ; echo "IODEPTH           = $IODEPTH" >&2
+	BS=${BS:-4k}                                     ; echo "BS                = $BS" >&2
+	RW=${RW:-read}                                   ; echo "RW                = $RW" >&2
+
+	test_cmd=
+	if [ "$TEST_COMMANDS" == 1 ]; then
+		test_cmd="echo COMMAND: "
+		OUTPUT=/dev/stdout
+	fi
+
+	$test_cmd fio \
+		--output-format=json \
+		--unified_rw_reporting=1 \
+		--time_based=1 \
+		--runtime="$RUNTIME" \
+		--directory="$DIRECTORY" \
+		--filename="$FILENAME" \
+		--filesize="$FILESIZE" \
+		--direct=1 \
+		--ioengine=libaio \
+		--name=jobname \
+		--iodepth="$IODEPTH" \
+		--bs="$BS" \
+		--rw="$RW" > $OUTPUT
+}
+
+function get_at3script() {
+	wait="$1"
+	instances="$2"
+	interval="$3"
+	for ((i=0;i<$instances;i++)); do
+		jc=$((wait + i*interval))
+		echo -n "0:wait;0:write_ratio=0;${jc}m:wait=false"
+		for j in 0.1 0.2 0.3 0.5 0.7 1; do
+			jc=$((jc + interval*instances))
+			echo -n ";${jc}m:write_ratio=$j"
+		done
+		echo
+	done
+}

@@ -1,0 +1,44 @@
+diff --git a/db/db_impl/db_impl_open.cc b/db/db_impl/db_impl_open.cc
+index 9d82a0a..047aa20 100644
+--- a/db/db_impl/db_impl_open.cc
++++ b/db/db_impl/db_impl_open.cc
+@@ -23,6 +23,8 @@
+ #include "test_util/sync_point.h"
+ #include "util/rate_limiter.h"
+ 
++#include "rocksdb_test/rcm_impl.h"
++
+ namespace ROCKSDB_NAMESPACE {
+ Options SanitizeOptions(const std::string& dbname, const Options& src) {
+   auto db_options = SanitizeOptions(dbname, DBOptions(src));
+@@ -1444,8 +1446,7 @@ Status DB::Open(const DBOptions& db_options, const std::string& dbname,
+                 std::vector<ColumnFamilyHandle*>* handles, DB** dbptr) {
+   const bool kSeqPerBatch = true;
+   const bool kBatchPerTxn = true;
+-  return DBImpl::Open(db_options, dbname, column_families, handles, dbptr,
+-                      !kSeqPerBatch, kBatchPerTxn);
++  RCM_OPEN_CMD;
+ }
+ 
+ IOStatus DBImpl::CreateWAL(uint64_t log_file_num, uint64_t recycle_log_number,
+diff --git a/include/rocksdb/db.h b/include/rocksdb/db.h
+index 840e1b4..f3e2200 100644
+--- a/include/rocksdb/db.h
++++ b/include/rocksdb/db.h
+@@ -26,6 +26,8 @@
+ #include "rocksdb/types.h"
+ #include "rocksdb/version.h"
+ 
++#include "rocksdb_test/rcm.h"
++
+ #ifdef _WIN32
+ // Windows API macro interference
+ #undef DeleteFile
+@@ -1655,6 +1657,7 @@ class DB {
+     return Status::NotSupported("Supported only by secondary instance");
+   }
+ #endif  // !ROCKSDB_LITE
++  DECLARE_RCM_POINTER;
+ };
+ 
+ // Destroy the contents of the specified database.

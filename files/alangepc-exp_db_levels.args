@@ -1,0 +1,13 @@
+{
+	"data_path": "/media/auto/work",
+	"before_run_cmd": "telegram-send 'Initiating experiment {output}'",
+	"after_run_cmd": "telegram-send 'Experiment {output} returned exit code {exit_code}'",
+	"duration": 90,
+	"warm_period": 30,
+	"backup_ycsb": "/media/auto/work2/ycsb.tar",
+	"ydb_workload_list": "workloada workloadb",
+	"ydb_num_keys": 50000000,
+	"ydb_threads": 5,
+	"at_block_size_list": "4 8 16 32 64 128 256 512",
+	"params": "--perfmon=true --ydb_rocksdb_jni=../rocksdb.dev/java/target/rocksdbjni-6.15.3-linux64.jar --ydb_socket=true"
+}

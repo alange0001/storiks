@@ -1,0 +1,178 @@
+#!/bin/bash
+#
+# Copyright (c) 2020-present, Adriano Lange.  All rights reserved.
+# This source code is licensed under both the GPLv2 (found in the
+# LICENSE.GPLv2 file in the root directory) and Apache 2.0 License
+# (found in the LICENSE.Apache file in the root directory).
+#
+
+DB_KEYS=${DB_KEYS:-500000000}  # db_bench
+YDB_KEYS=${YDB_KEYS:-50000000} # YCSB
+
+TEST_COMMANDS=${TEST_COMMANDS:-0}
+SEND_MESSAGE=${SEND_MESSAGE:-1}
+
+source run_functions
+
+if [ "$1" == 'at3' ]; then
+	DURATION=${DURATION:-10}
+	WARM_PERIOD=${WARM_PERIOD:-0}
+	NUM_AT=1
+	AT_PARAMS="--flush_blocks=0 --random_ratio=0.5 --wait --direct_io"
+	AT_SCRIPT="10:wait=false"
+
+	OUTPUT="plot/at3.out"
+	run_generic
+
+	exit 0
+fi
+
+if [ "$1" == 'dbbench' ]; then
+	DURATION=${DURATION:-60}
+	WARM_PERIOD=${WARM_PERIOD:-0}
+	RESTORE_DBS=${RESTORE_DBS:-1}
+	NUM_DBS=1
+	DB_WORKLOAD=readwhilewriting
+	DB_THREADS=9
+	NUM_AT=0
+
+	OUTPUT=${OUTPUT:-plot/dbbench_wwr.out}
+	run_generic
+
+	exit 0
+fi
+
+if [ "$1" == 'create_ycsb' ]; then
+	DURATION=60
+	WARM_PERIOD=0
+	ROCKSDB_CONFIG="files/rocksdb-6.11-db_bench.options"
+	NUM_YDBS=1
+	YDB_WORKLOAD="workloada"
+	YDB_THREADS=4
+	PARAMS="--ydb_create=true"
+
+	run_generic
+
+	exit 0
+fi
+
+if [ "$1" == 'ycsb' ]; then
+	OUTPUT2=${OUTPUT}
+	DURATION=${DURATION:-60}
+	WARM_PERIOD=${WARM_PERIOD:-0}
+	RESTORE_DBS=${RESTORE_DBS:-1}
+	NUM_YDBS=1
+
+	YDB_WORKLOAD_LIST=${YDB_WORKLOAD_LIST:-workloadb workloada}
+
+	#for YDB_THREADS in 4 6 8 10; do
+	for YDB_THREADS in 5; do
+		for YDB_WORKLOAD in $YDB_WORKLOAD_LIST; do
+			OUTPUT=${OUTPUT2:-plot/ycsb_${YDB_WORKLOAD}_threads${YDB_THREADS}.out}
+			run_generic
+		done
+	done
+
+	exit 0
+fi
+
+if [ "$1" == 'ycsb_x3' ]; then
+	DURATION=46
+	WARM_PERIOD=1
+	RESTORE_DBS=0
+	NUM_YDBS=3
+	YDB_SLEEP="0#16#31"
+
+	for YDB_THREADS in 4; do
+		for YDB_WORKLOAD in workloadb workloada; do
+			OUTPUT="plot/exp_ycsb/${1}-threads${YDB_THREADS}_${YDB_WORKLOAD}.out"
+			run_generic
+		done
+	done
+
+	exit 0
+fi
+
+if [ "$1" == 'dbbench_at3' ]; then
+	DURATION=${DURATION:-90}
+	WARM_PERIOD=${WARM_PERIOD:-30}
+	RESTORE_DBS=${RESTORE_DBS:-1}
+	NUM_DBS=1
+	DB_WORKLOAD=readwhilewriting
+	DB_THREADS=9
+	NUM_AT=4
+	AT_PARAMS="--flush_blocks=0 --random_ratio=0.5 --wait --direct_io"
+	atinterval=2
+	AT_SCRIPT=`get_at3script $((WARM_PERIOD + 10)) $NUM_AT $atinterval |paste -s -d'#'`
+	#echo $AT_SCRIPT
+	#exit 0
+
+	AT_BLOCK_SIZE_LIST=${AT_BLOCK_SIZE_LIST:-4}
+
+	for AT_BLOCK_SIZE in $AT_BLOCK_SIZE_LIST; do
+		OUTPUT="plot/dbbench_wwr,at3_bs${AT_BLOCK_SIZE}_directio.out"
+		run_generic
+	done
+
+	exit 0
+fi
+
+if [ "$1" == 'ycsb_at3' ]; then
+	DURATION=${DURATION:-90}
+	WARM_PERIOD=${WARM_PERIOD:-30}
+	RESTORE_DBS=${RESTORE_DBS:-1}
+	NUM_YDBS=1
+	YDB_THREADS=5
+	NUM_AT=4
+	AT_PARAMS="--flush_blocks=0 --random_ratio=0.5 --wait --direct_io"
+	atinterval=2
+	AT_SCRIPT=`get_at3script $((WARM_PERIOD + 10)) $NUM_AT $atinterval |paste -s -d'#'`
+	#echo $AT_SCRIPT
+	#exit 0
+
+	AT_BLOCK_SIZE_LIST=${AT_BLOCK_SIZE_LIST:-4}
+	YDB_WORKLOAD_LIST=${YDB_WORKLOAD_LIST:-workloadb workloada}
+
+	for AT_BLOCK_SIZE in $AT_BLOCK_SIZE_LIST; do
+		for YDB_WORKLOAD in $YDB_WORKLOAD_LIST; do
+			OUTPUT="plot/ycsb_${YDB_WORKLOAD},at3_bs${AT_BLOCK_SIZE}_directio.out"
+			run_generic
+		done
+	done
+
+	exit 0
+fi
+
+if [ "$1" == 'rrwr_dbs1' ]; then
+	DURATION=16
+	WARM_PERIOD=1
+	RESTORE_DBS=0
+	NUM_DBS=1
+	DB_WORKLOAD=readrandomwriterandom
+
+	for DB_THREADS in 20; do
+		for readwritepercent in 5 10 20 50; do
+			PARAMS="--db_readwritepercent=$readwritepercent"
+			OUTPUT="plot/exp_rrwr/${1}-threads${DB_THREADS}_writeratio${readwritepercent}.out"
+			run_generic
+		done
+	done
+
+	exit 0
+fi
+
+if [ "$1" == 'fio' ]; then
+	s=0
+	for RW in read randread write randwrite; do
+		[ "$RW" == "write" ] || [ "$RW" == "randwrite" ] && s=40
+		for BS in 4k 8k 16k 32k 256k 512k; do
+			for IODEPTH in 1 2 4 6 8 12 16 20 24 28 32; do
+				OUTPUT="plot/exp_fio/${1}-${RW}_bs${BS}_depth${IODEPTH}.out"
+				run_fio
+				sleep $s
+			done
+		done
+	done
+
+	exit 0
+fi
