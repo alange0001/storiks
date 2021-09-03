@@ -11,11 +11,13 @@ LICENSE file in the root directory) and Apache 2.0 License
 __version__ = '0.1'
 __all__ = [
  	'PROJECT_NAME', 'PROJECT_VERSION', 'DOCKER_IMAGE',
-	'plot', 'util'
+	'util', 'plot'
 ]
 __author__ = 'Adriano Lange <alange0001@gmail.com>'
 
 from .version import *
+from . import util
+from . import plot
 
 __version__ = PROJECT_VERSION
 

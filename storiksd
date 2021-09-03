@@ -36,7 +36,7 @@ args = None
 class CommunicationFiles:
 	basedir = os.getenv('STORIKS_COMMUNICATION_DIR')
 	id = f'{basedir}/id'
-	notebook_url = f'{basedir}/{storiks.version.NOTEBOOK_URL_FILE}'
+	notebook_url = f'{basedir}/{storiks.NOTEBOOK_URL_FILE}'
 
 	@classmethod
 	def wipe(cls):
@@ -70,7 +70,6 @@ class Program:
 		log.addHandler(log_h)
 		log.setLevel(getattr(logging, args.log_level.upper()))
 
-		log.debug(f'{_function_}: Args: {str(args)}')
 		return args
 
 	def main(self) -> int:
@@ -82,8 +81,9 @@ class Program:
 						  lambda signumber, stack, signame=i: signal_handler(signame,  signumber, stack))
 
 		try:
-			log.info(f'storiksd version {storiks.version.PROJECT_VERSION}')
 			args = self.get_args()
+			log.info(f'storiksd version {storiks.PROJECT_VERSION}')
+			log.debug(f'\t{_function_}: Args: {str(args)}')
 			log.info(f'\t{os.environ}')
 
 			CommunicationFiles.wipe()
