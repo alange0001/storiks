@@ -244,16 +244,40 @@ public:
 
 ////////////////////////////////////////////////////////////////////////////////////
 #undef __CLASS__
+#define __CLASS__ "CommunicationDir::"
+
+class CommunicationDir {
+	bool active = false;
+	std::filesystem::path path;
+
+	void savePID();
+
+public:
+	CommunicationDir();
+	bool isActive();
+	std::filesystem::path getPath();
+
+	struct WriteOptions {
+		bool overwrite=false;
+		bool throw_except=false;
+		bool print_error=false;
+	};
+	std::pair<bool, string> writeStr(const std::filesystem::path& filename, const string& str, const WriteOptions& options);
+};
+
+////////////////////////////////////////////////////////////////////////////////////
+#undef __CLASS__
 #define __CLASS__ "TmpDir::"
 
 class TmpDir {
 	std::filesystem::path base;
 
 public:
-	TmpDir();
+	TmpDir(CommunicationDir* commdir=nullptr);
 	~TmpDir();
 	std::filesystem::path getContainerDir(const string& container_name);
 	std::filesystem::path getFileCopy(const std::filesystem::path& original_file);
+	std::filesystem::path getBase();
 };
 
 ////////////////////////////////////////////////////////////////////////////////////

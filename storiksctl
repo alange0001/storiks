@@ -321,6 +321,7 @@ class Start (Subcommand):
 		self._register_env('PERFMON_CHROOT', '/hostfs')
 		self._register_env('PERFMON_IOSTAT', 'false')
 		self._register_env('STORIKS_DOCKER_IMAGE', args.docker_image)
+		self._register_env('STORIKS_SOCKET', 'auto')
 
 		docker_path = self._get_cmd_output('which docker')
 		ret.append(f'-v "{docker_path}":/usr/bin/docker:ro')

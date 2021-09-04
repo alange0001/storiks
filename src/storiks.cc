@@ -46,6 +46,7 @@ using fmt::format;
 #undef __CLASS__
 #define __CLASS__ ""
 
+std::unique_ptr<CommunicationDir> commdir;
 std::unique_ptr<TmpDir> tmpdir;
 std::unique_ptr<TimeSync> tsync;
 
@@ -866,7 +867,8 @@ class Program {
 		try {
 			args.reset(new Args(argc, argv));
 			clock.reset(new Clock());
-			tmpdir.reset(new TmpDir());
+			commdir.reset(new CommunicationDir());
+			tmpdir.reset(new TmpDir(commdir.get()));
 			tsync.reset(new TimeSync(args->stats_interval));
 
 			auto num_dbs = args->num_dbs;
@@ -1062,6 +1064,14 @@ class Program {
 		public:
 		CommandServer(Program& program_) : program(program_) {
 			DEBUG_MSG("constructor");
+
+			if (program.args->socket == "auto") {
+				auto aux = tmpdir->getBase() / "storiks.sock";
+				program.args->socket = aux.c_str();
+				if (commdir.get() != nullptr && commdir->isActive()) {
+					commdir->writeStr("storiks_socket.path", format("{}\n", aux.c_str()), {.overwrite=true, .throw_except=false, .print_error=true});
+				}
+			}
 
 			if (program.args->socket != "") {
 				get_experiments();

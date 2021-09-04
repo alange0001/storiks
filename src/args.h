@@ -102,9 +102,9 @@ using std::function;
 		true,                                                     \
 		nullptr)                                                  \
 	_f(socket, string, DEFINE_string,                             \
-		"",                                                       \
+		getenv_default("STORIKS_SOCKET", ""),                     \
 		"Socket used to control the experiment",                  \
-		value == "" || !std::filesystem::exists(value),           \
+		value == "" || value == "auto" || !std::filesystem::exists(value), \
 		nullptr)                                                  \
 	_f(commands, string, DEFINE_string,                           \
 		"",                                                       \

@@ -14,6 +14,7 @@
 #include <limits>
 #include <atomic>
 #include <system_error>
+#include <fstream>
 
 using std::string;
 using std::vector;
@@ -73,6 +74,87 @@ void LogLevel::set(const string& name) {
 	throw invalid_argument(aux);
 }
 
+
+////////////////////////////////////////////////////////////////////////////////////
+#undef __CLASS__
+#define __CLASS__ "CommunicationDir::"
+
+CommunicationDir::CommunicationDir() {
+	auto envbase = getenv("STORIKS_COMMUNICATION_DIR");
+	if (envbase != nullptr) {
+		std::filesystem::path aux(envbase);
+		if (std::filesystem::is_directory(aux)) {
+			path = aux;
+			active = true;
+			savePID();
+		} else {
+			throw std::runtime_error(format("invalid communication directory: {}", aux.c_str()).c_str());
+		}
+	}
+}
+
+void CommunicationDir::savePID() {
+	const char* filename = "storiks.pid";
+	auto filepath = path / filename;
+
+	if (std::filesystem::exists(filepath)) {
+		spdlog::warn("there is a file named \"{}\"", filepath.c_str());
+		if (!std::filesystem::is_regular_file(filepath))
+			throw std::runtime_error(format("invalid existent file \"{}\"", filepath.c_str()).c_str());
+
+		int pid;
+		std::ifstream stream(filepath.c_str());
+		if (stream.fail())
+			throw std::runtime_error(format("failed to open file \"{}\"", filepath.c_str()).c_str());
+		stream >> pid;
+		if (!stream.fail()) {
+			spdlog::warn("checking the existence of a process with PID = {}", pid);
+			if (std::filesystem::exists(format("/proc/{}", pid).c_str())) {
+				throw std::runtime_error(format("there is another instance of storiks running with PID={}", pid).c_str());
+			}
+		}
+	}
+	writeStr(filename, format("{}\n", getpid()), {.overwrite=true, .throw_except=true});
+}
+
+bool CommunicationDir::isActive() {
+	return active;
+}
+
+std::filesystem::path CommunicationDir::getPath() {
+	return path;
+}
+
+std::pair<bool, string> CommunicationDir::writeStr(const std::filesystem::path& filename, const string& str, const CommunicationDir::WriteOptions& options) {
+	try {
+		if (! active)
+			throw std::runtime_error("communication directory is not active");
+
+		auto filepath = path / filename;
+		if (std::filesystem::exists(filepath) && !options.overwrite)
+			throw std::runtime_error(format("overwrite file \"{}\" is not allowed", filepath.c_str()).c_str());
+
+		std::ofstream stream(filepath.c_str(), std::ios::trunc);
+		if (stream.fail())
+			throw std::runtime_error(format("failed to create file \"{}\"", filepath.c_str()).c_str());
+		stream << str;
+		if (stream.fail())
+			throw std::runtime_error(format("failed to write file \"{}\"", filepath.c_str()).c_str());
+
+		return {true, ""};
+
+	} catch (const std::exception& e) {
+		if (options.throw_except)
+			throw e;
+		else {
+			if (options.print_error)
+				spdlog::error("{}", e.what());
+			return {false, e.what()};
+		}
+	}
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////////
 #undef __CLASS__
 #define __CLASS__ "TmpDir::"
@@ -80,15 +162,14 @@ void LogLevel::set(const string& name) {
 static int tmpdir_runcount = 1;
 static std::atomic<int> tmpdir_filecount = 1;
 
-TmpDir::TmpDir() {
+TmpDir::TmpDir(CommunicationDir* commdir) {
 	DEBUG_MSG("constructor");
 
-	auto envbase = getenv("STORIKS_COMMUNICATION_DIR");
-	DEBUG_MSG("envbase = {}", envbase);
-	auto prebase = (envbase != nullptr) ? std::filesystem::path(envbase) : std::filesystem::temp_directory_path();
+
+	auto prebase = (commdir != nullptr && commdir->isActive()) ? commdir->getPath() : std::filesystem::temp_directory_path();
 	DEBUG_MSG("prebase = {}", prebase.c_str());
 	if (! std::filesystem::is_directory(prebase)) {
-		throw runtime_error(format("invalid communication directory for experiments: {}", prebase.c_str()).c_str());
+		throw runtime_error(format("invalid base temporary directory: {}", prebase.c_str()).c_str());
 	}
 
 	while (true) {
@@ -96,25 +177,26 @@ TmpDir::TmpDir() {
 		DEBUG_MSG("base = {}", base.c_str());
 
 		if ( std::filesystem::create_directories(base) ) {
-			spdlog::info("communication directory: {}", base.c_str());
+			spdlog::info("experiment temporary directory: {}", base.c_str());
 			break;
 		} else {
 			if (!std::filesystem::exists(base))
-				throw runtime_error(format("impossible to criate a subdirectory in {}", prebase.c_str()).c_str());
-			spdlog::warn("failed to create the communication directory {}. Try again.", base.c_str());
+				throw runtime_error(format("impossible to create the experiment temporary directory: {}", prebase.c_str()).c_str());
+			spdlog::warn("failed to create the experiment temporary directory {}. Try again.", base.c_str());
 		}
 
 		if (tmpdir_runcount > 1024) {
-			throw runtime_error(format("failed to create the experiment temporary directory in {}", prebase.c_str()).c_str());
+			throw runtime_error(format("failed to create the experiment temporary directory: {}", prebase.c_str()).c_str());
 		}
 	}
+
 	DEBUG_MSG("constructor finished");
 }
 
 TmpDir::~TmpDir() {
 	DEBUG_MSG("destructor");
 	if (! std::filesystem::remove_all(base) ) {
-		spdlog::error("failed to delete temorary directory \"{}\"", base.c_str());
+		spdlog::error("failed to delete experiment temporary directory \"{}\"", base.c_str());
 	}
 }
 
@@ -145,6 +227,11 @@ std::filesystem::path TmpDir::getFileCopy(const std::filesystem::path& original_
 	}
 	return ret;
 }
+
+std::filesystem::path TmpDir::getBase() {
+	return base;
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////////
 #undef __CLASS__
