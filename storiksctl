@@ -216,6 +216,14 @@ class Subcommand:
 				return None
 		return cur_v
 
+	def _set_proc_name(self, name):
+		try:
+			pid = os.getpid()
+			with open(f"/proc/{pid}/comm", 'wt') as f:
+				f.write(name)
+		except:
+			log.warning('failed to change the process name')
+
 	def _str_as_bool(self, value:str, default=False, invalid=False):
 		if value is None:
 			return default
@@ -261,6 +269,7 @@ class Start (Subcommand):
 		return parser2
 
 	def __init__(self):
+		self._set_proc_name(f'storiksctl {self._name_}')
 		args.perfmon = self._str_as_bool(args.perfmon, default=True)
 
 		if self._get_container_metadata() is not None:
@@ -404,6 +413,7 @@ class Stop (Subcommand):
 		return parser2
 
 	def __init__(self):
+		self._set_proc_name(f'storiksctl {self._name_}')
 		log.info('Stopping storiks container...')
 		self._execute(f'docker stop storiks')
 
@@ -428,6 +438,7 @@ class Status (Subcommand):
 		return parser2
 
 	def __init__(self):
+		self._set_proc_name(f'storiksctl {self._name_}')
 		metadata = self._get_container_metadata()
 		if metadata is not None:
 			print(f'Status: {self._get_recursive(metadata, "State", "Status")}, '
@@ -465,6 +476,7 @@ class Terminal (Subcommand):
 		return parser2
 
 	def __init__(self):
+		self._set_proc_name(f'storiksctl {self._name_}')
 		if args.root:
 			self._execute(f'docker exec -ti storiks bash')
 		else:
@@ -482,6 +494,7 @@ class Open (Subcommand):
 		return parser2
 
 	def __init__(self):
+		self._set_proc_name(f'storiksctl {self._name_}')
 		url = self._get_notebook_url()
 		log.info(f'Open jupyter-notebook url: {url}')
 		self._execute(f'xdg-open \'{url}\'')
