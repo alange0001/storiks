@@ -42,13 +42,16 @@ storiks:
 	@+cd "$(STORIKS_SRC)" && make bin
 	@echo "Install storiks from $(STORIKS_SRC) to $(STORIKS_DST)"
 	@rm -fr "$(STORIKS_DST)"
-	@mkdir -p "$(STORIKS_DST)"/bin || true
-	@mkdir -p "$(STORIKS_DST)"/lib || true
+	@mkdir "$(STORIKS_DST)"
+	@cp -a "$(STORIKS_SRC)/bin" "$(STORIKS_DST)"
+	@rm -fr "$(STORIKS_DST)/bin/__pycache__"
 	@cp "$(STORIKS_SRC)/build/access_time3" "$(STORIKS_DST)/bin"
 	@cp "$(STORIKS_SRC)/build/storiks" "$(STORIKS_DST)/bin"
-	@cp "$(STORIKS_SRC)/storiksd" "$(STORIKS_DST)/bin"
+	@mkdir -p "$(STORIKS_DST)"/lib
 	@cp -a "$(STORIKS_SRC)/lib/storiks" "$(STORIKS_DST)"/lib
+	@rm -fr "$(STORIKS_DST)/lib/storiks/__pycache__"
 	@cp -a "$(STORIKS_SRC)/examples" "$(STORIKS_DST)"
+	@rm -fr "$(STORIKS_DST)/examples/.ipynb_checkpoints"
 
 ycsb: rocksdb
 	$(info Compile YCSB from $(YCSB_SRC))
