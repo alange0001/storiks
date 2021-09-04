@@ -35,7 +35,7 @@ class ArgsWrapper:  # single global instance of "args"
 			default='',
 			help='Output config file.')
 		parser.add_argument('--template', type=str,
-			default='08',
+			default='09',
 			help='Template number.')
 		parser.add_argument('--list',
 			default=False, action='store_true',
