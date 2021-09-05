@@ -392,7 +392,11 @@ class Start (Subcommand):
 
 	def _get_args_communication(self) -> str:
 		ret = []
+		if args.communication_dir == '/tmp':
+			log.warning(f'"/tmp" must not be used as --communication_dir. Using "/tmp/storiks".')
+			args.communication_dir = '/tmp/storiks'
 		dirname = args.communication_dir
+
 		if not os.path.isdir(dirname):
 			if not self._execute(f'mkdir -p "{dirname}"', False):
 				raise Exception(f'failed to create the communication directory: {dirname}')
