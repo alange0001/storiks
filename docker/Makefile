@@ -9,16 +9,15 @@ YCSB_DST = $(WORKSPACE)/opt/YCSB
 PERFMON_DST = $(WORKSPACE)/opt/performancemonitor
 PERFMON_SRC = $(WORKSPACE)/../3rd-party/performancemonitor
 
-DOCKER_IMG ?= "alange0001/storiks"
-DOCKER_TAG ?= "latest"
+DOCKER_IMAGE = $(shell ../storiksctl config --get DOCKER_IMAGE)
 
 all:
 	@+make opt
 	@make docker
 
 docker:
-	$(info Creating docker image)
-	@docker build -t "$(DOCKER_IMG):$(DOCKER_TAG)" --compress .
+	$(info Creating docker image "$(DOCKER_IMAGE)")
+	@docker build -t "$(DOCKER_IMAGE)" --compress .
 
 opt:
 	@+make storiks

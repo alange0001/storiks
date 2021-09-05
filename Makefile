@@ -3,7 +3,7 @@ BUILD_TYPE ?= Release
 
 bin: bin-deps version_py
 	$(info Executing target $@)
-	@./storiksctl --version_h > src/version.h.new
+	@./storiksctl config --version_h > src/version.h.new
 	test -f "src/version.h" || cp -f src/version.h.new src/version.h
 	test "$(shell md5sum src/version.h |cut -d' ' -f1 )x == $(shell md5sum src/version.h.new |cut -d' ' -f1 )x" || cp -f src/version.h.new src/version.h 
 	+cd build && make
@@ -33,7 +33,7 @@ build: CMakeLists.txt
 
 version_py:
 	$(info Executing target $@)
-	@./storiksctl --version_py > lib/storiks/version.py
+	@./storiksctl config --version_py > lib/storiks/version.py
 
 
 #########################################################################################

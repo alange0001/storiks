@@ -39,6 +39,9 @@ class Config:
 		d['COMMUNICATION_DIR'] = '/tmp/storiks'  # default communication directory between containers
 		d['NOTEBOOK_URL_FILE'] = 'jupyter-notebook.url'
 
+	def keys(self):
+		return self._conf.keys()
+
 	def items(self):
 		return self._conf.items()
 
@@ -74,15 +77,6 @@ class ArgsWrapper:  # single global instance of "args"
 		parser.add_argument('-l', '--log_level', type=str,
 			default='INFO', choices=[ 'debug', 'DEBUG', 'info', 'INFO' ],
 			help='Log level.')
-		parser.add_argument('--version',
-			default=False, action='store_true',
-			help='Print version and exit.')
-		parser.add_argument('--version_h',
-			default=False, action='store_true',
-			help='Output version.h and exit (internal use).')
-		parser.add_argument('--version_py',
-			default=False, action='store_true',
-			help='Output version.py and exit (internal use).')
 
 		subparser = parser.add_subparsers(dest='subcommand', title='Subcommands')
 		Subcommand.registerall(subparser)
@@ -235,6 +229,43 @@ class Subcommand:
 		if ev in ['0', 'f', 'false', 'n', 'no']:
 			return False
 		return invalid
+
+
+# =============================================================================
+class ConfigCmd(Subcommand):
+	_name_ = 'config'
+
+	@classmethod
+	def register(cls, subparser):
+		parser2 = subparser.add_parser(cls._name_, help='Print config information.')
+		parser2.add_argument('--version',
+			default=False, action='store_true',
+			help='Print version and exit.')
+		parser2.add_argument('--version_h',
+			default=False, action='store_true',
+			help='Print version.h and exit (internal use).')
+		parser2.add_argument('--version_py',
+			default=False, action='store_true',
+			help='Print version.py and exit (internal use).')
+		parser2.add_argument('--get', type=str,
+			default=None,
+			help='Return the value of a configuration variable.')
+		return parser2
+
+	def __init__(self):
+		if args.version:
+			config.print_version()
+		elif args.version_h:
+			config.print_version_h()
+		elif args.version_py:
+			config.print_version_py()
+		elif args.get is not None:
+			if args.get in config.keys():
+				print(config[args.get])
+			else:
+				log.error(f'invalid config name: {args.get}')
+
+Subcommand.add_subclass(ConfigCmd)
 
 
 # =============================================================================
@@ -509,13 +540,7 @@ Subcommand.add_subclass(Open)
 # =============================================================================
 def main() -> int:
 	try:
-		if args.version:
-			config.print_version()
-		elif args.version_h:
-			config.print_version_h()
-		elif args.version_py:
-			config.print_version_py()
-		elif Subcommand.subcommand_by_name(args.subcommand) is not None:
+		if Subcommand.subcommand_by_name(args.subcommand) is not None:
 			Subcommand.subcommand_by_name(args.subcommand)()
 		else:
 			raise Exception('unknown action')
