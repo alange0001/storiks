@@ -62,7 +62,7 @@ class FakeLog:
 		sys.stderr.write(f'ERROR: {msg}\n')
 
 # =============================================================================
-class CmdServer:  # single instance
+class SocketServer:
 	_log           = FakeLog
 	_filename      = None
 	_server        = None
@@ -78,7 +78,7 @@ class CmdServer:  # single instance
 		def handle(self):
 			self._handler_method()
 
-	def __init__(self, filename, handler_method, log=FakeLog):
+	def __init__(self, filename, handler_method, chown=None, chmod=None, log=FakeLog):
 		self._log = log
 		self._filename = filename
 		self.ThreadedRequestHandler._handler_method = handler_method
@@ -92,6 +92,11 @@ class CmdServer:  # single instance
 		log.info(f'Starting {self.__class__.__name__} {filename}')
 		self._server_thread.start()
 		log.debug(f'{self.__class__.__name__} started')
+
+		if chown is not None:
+			os.chown(filename, chown[0], chown[1])
+		if chmod is not None:
+			os.chmod(filename, chmod)
 
 	def __del__(self):
 		self._log.info(f'Stopping {self.__class__.__name__} {self._filename}')

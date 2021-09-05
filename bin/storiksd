@@ -37,6 +37,7 @@ class CommunicationFiles:
 	basedir = os.getenv('STORIKS_COMMUNICATION_DIR')
 	id = f'{basedir}/id'
 	notebook_url = f'{basedir}/{storiks.NOTEBOOK_URL_FILE}'
+	storiksd_socket = f'{basedir}/storiksd.socket'
 
 	@classmethod
 	def wipe(cls):
@@ -90,14 +91,21 @@ class Program:
 			self.set_basic_files()
 			self.create_user_groups()
 			self.set_etc_profile()
+
 			nbserver = NotebookServer()
 			perfmon = Performancemonitor() if env_as_bool('STORIKS_RUN_PERFMON') else None
 
+			cmd_server = storiks.util.SocketServer(
+				CommunicationFiles.storiksd_socket,
+				lambda obj: self.cmd_handler(obj),
+				chown=(int(os.getenv('STORIKS_USER_UID')), 0),
+				log=log)
+
 			time.sleep(1)
-			while True:
-				if perfmon is not None and perfmon.check_status() == 0:
+			while True:  # main loop
+				if perfmon is not None and perfmon.check_status() is not None:
 					log.error(f'performancemonitor is not running')
-				if nbserver.check_status() == 0:
+				if nbserver.check_status() is not None:
 					raise Exception(f'jupyter-notebook is not running')
 				time.sleep(5)
 
@@ -158,12 +166,17 @@ class Program:
 				log.info(f'creating group {groupname}, gid={gid}')
 				execute(f'groupadd -g {gid} "{groupname}"', False)
 
+		for e in [  # required environment variables
+			'STORIKS_USER', 'STORIKS_USER_UID', 'STORIKS_USER_GID', 'STORIKS_USER_IDS'
+		]:
+			if os.getenv(e) is None:
+				raise Exception(f'undefined environment variable: {e}')
+
 		id_line = os.getenv('STORIKS_USER_IDS')
 		log.debug(f'{_function_}: STORIKS_USER_IDS = {id_line}')
 		if id_line is None:
 			log.warning('undefined environment variable STORIKS_USER_IDS')
 			return
-		log.debug(f'{_function_}: STORIKS_USER_IDS = {id_line}')
 
 		r = re.findall(r'gid=([0-9]+)\((\w+)\)', id_line)
 		log.debug(f'{_function_}: r = {r}')
@@ -193,6 +206,11 @@ class Program:
 				execute(f'useradd -u {uid} -g {gid} {additional_groups} -d /home/user '
 						f'--shell /bin/bash "{username}"', False)
 
+	def cmd_handler(self, handlerObj):
+		_function_ = 'Program.cmd_handler()'
+		cmd = str(handlerObj.request.recv(1024), 'utf-8').strip()
+		log.info(f'Socket command received: ' + cmd if len(cmd) < 70 else (cmd[0:66]+' ...'))
+
 # =============================================================================
 class NotebookServer:
 	_process = None
@@ -205,7 +223,7 @@ class NotebookServer:
 		_function_ = 'NotebookServer'
 		log.debug(f'{_function_}: constructor')
 		if os.getenv('STORIKS_USER') is None:
-			raise Exception(f'failed to start jupyter-notebook. Environment variable STORIKS_USER not defined.')
+			raise Exception(f'Failed to start jupyter-notebook. Environment variable STORIKS_USER not defined.')
 
 		self._copy_examples()
 
