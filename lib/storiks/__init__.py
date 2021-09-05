@@ -8,16 +8,15 @@ LICENSE file in the root directory) and Apache 2.0 License
 (found in the LICENSE.Apache file in the root directory).
 """
 
-__version__ = '0.1'
+from .version import *
+__version__ = PROJECT_VERSION
+
 __all__ = [
  	'PROJECT_NAME', 'PROJECT_VERSION', 'DOCKER_IMAGE',
-	'util', 'plot'
+	'util', 'plot', 'run'
 ]
 __author__ = 'Adriano Lange <alange0001@gmail.com>'
 
-from .version import *
 from . import util
 from . import plot
-
-__version__ = PROJECT_VERSION
-
+from . import run
