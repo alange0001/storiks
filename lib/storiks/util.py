@@ -12,6 +12,9 @@ LICENSE.GPLv2 file in the root directory) and Apache 2.0 License
 """
 
 import os
+import sys
+import socketserver
+import threading
 
 def coalesce(*values):
 	for v in values:
@@ -44,3 +47,53 @@ def env_as_bool(envname, not_found=False, default=False, invalid=False):
 	if ev in ['0', 'f', 'false', 'n', 'no']:
 		return False
 	return invalid
+
+
+# =============================================================================
+class FakeLog:
+	@classmethod
+	def debug(cls, msg):
+		pass
+	@classmethod
+	def info(cls, msg):
+		sys.stdout.write(f'INFO: {msg}\n')
+	@classmethod
+	def error(cls, msg):
+		sys.stderr.write(f'ERROR: {msg}\n')
+
+# =============================================================================
+class CmdServer:  # single instance
+	_log           = FakeLog
+	_filename      = None
+	_server        = None
+	_server_thread = None
+
+	# https://docs.python.org/3/library/socketserver.html
+	class ThreadedServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+		pass
+
+	class ThreadedRequestHandler(socketserver.BaseRequestHandler):
+		_handler_method = None
+
+		def handle(self):
+			self._handler_method()
+
+	def __init__(self, filename, handler_method, log=FakeLog):
+		self._log = log
+		self._filename = filename
+		self.ThreadedRequestHandler._handler_method = handler_method
+
+		if os.path.exists(filename):
+			os.remove(filename)
+
+		self._server = self.ThreadedServer(filename, self.ThreadedRequestHandler)
+		self._server_thread = threading.Thread(name=filename, target=self._server.serve_forever)
+		self._server_thread.daemon = True
+		log.info(f'Starting {self.__class__.__name__} {filename}')
+		self._server_thread.start()
+		log.debug(f'{self.__class__.__name__} started')
+
+	def __del__(self):
+		self._log.info(f'Stopping {self.__class__.__name__} {self._filename}')
+		self._server.shutdown()
+		os.remove(self._filename)
