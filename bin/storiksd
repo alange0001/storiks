@@ -249,29 +249,48 @@ class CommandServer:
 		def get_parser():
 			ret = argparse.ArgumentParser("", add_help=True)
 			ret._print_message = print_message
-			subparser = ret.add_subparsers(dest='command', title='Commands')
-			parser2 = subparser.add_parser('test', help='test socket communication')
-			parser2 = subparser.add_parser('schedule', help='schedule command')
+			subparser = ret.add_subparsers(dest='action', title='Available Actions')
+			subparser.add_parser('test', help='test socket communication')
+			ScheduledCommand.register_args(subparser)
 			return ret
-		parser = get_parser()
+		try:
+			parser = get_parser()
 
-		cmd = receive()
-		log.info(f'Socket message [{count}]: ' + cmd if len(cmd) < 70 else (cmd[0:66]+' ...'))
-		cmd_args = parser.parse_args(shlex.split(cmd))
+			cmd = receive()
+			log.info(f'Socket message [{count}]: ' + cmd if len(cmd) < 70 else (cmd[0:66]+' ...'))
+			cmd_args = parser.parse_args(shlex.split(cmd))
 
-		if cmd_args.command == 'test':
-			send('test ok!')
+			if cmd_args.action == 'test':
+				send('test ok!')
+			elif cmd_args.action == 'schedule':
+				sc = ScheduledCommand(cmd_args)
+				with self._scheduled_commands_lock:
+					self._scheduled_commands.append(sc)
+
+		except Exception as e:
+			log.error(f'Socket exception [{count}]: {str(e)}')
+			send(f'ERROR: {str(e)}')
+
+		log.info(f'Socket closed [{count}].')
 
 
 # =============================================================================
 class ScheduledCommand:
+	@classmethod
+	def register_args(cls, subparser):
+		parser2 = subparser.add_parser('schedule', help='schedule command')
+		parser2.add_argument('--wait_time', default=0, type=int, help='wait time before execution (s)')
+		parser2.add_argument('--output', type=str, help='output file')
+		parser2.add_argument('cmd', help='command to be executed')
+		parser2.add_argument('cmd_args', nargs=argparse.REMAINDER)
+
 	_cmd = None
 	_finished = False
 	_fail_msg = None
 	_exitcode = None
 
-	def __init__(self, cmd):
-		self._cmd = cmd
+	def __init__(self, args):
+		pass
 
 	def run(self):
 		pass
