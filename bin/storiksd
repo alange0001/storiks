@@ -19,6 +19,7 @@ import time
 import threading
 import argparse
 import traceback
+import shlex
 import shutil
 import json
 import storiks
@@ -31,6 +32,7 @@ log.setLevel(logging.INFO)
 
 # =============================================================================
 args = None
+
 
 # =============================================================================
 class CommunicationFiles:
@@ -51,6 +53,7 @@ class CommunicationFiles:
 			if os.path.isfile(f):
 				log.info(f'removing old file: {f}')
 				os.remove(f)
+
 
 # =============================================================================
 class Program:
@@ -94,12 +97,7 @@ class Program:
 
 			nbserver = NotebookServer()
 			perfmon = Performancemonitor() if env_as_bool('STORIKS_RUN_PERFMON') else None
-
-			cmd_server = storiks.util.SocketServer(
-				CommunicationFiles.storiksd_socket,
-				lambda obj: self.cmd_handler(obj),
-				chown=(int(os.getenv('STORIKS_USER_UID')), 0),
-				log=log)
+			socket = CommandServer()
 
 			time.sleep(1)
 			while True:  # main loop
@@ -206,10 +204,78 @@ class Program:
 				execute(f'useradd -u {uid} -g {gid} {additional_groups} -d /home/user '
 						f'--shell /bin/bash "{username}"', False)
 
-	def cmd_handler(self, handlerObj):
-		_function_ = 'Program.cmd_handler()'
-		cmd = str(handlerObj.request.recv(1024), 'utf-8').strip()
-		log.info(f'Socket command received: ' + cmd if len(cmd) < 70 else (cmd[0:66]+' ...'))
+
+# =============================================================================
+class CommandServer:
+	_count = 0
+	_socket = None
+
+	_scheduled_commands_lock = None
+	_scheduled_commands = None
+	_current_command = None
+
+	def __init__(self):
+		self._scheduled_commands = list()
+		self._scheduled_commands_lock = threading.Lock()
+		self._socket = storiks.util.SocketServer(
+			CommunicationFiles.storiksd_socket,
+			lambda obj: self.connection_handler(obj),
+			chown=(int(os.getenv('STORIKS_USER_UID')), 0),
+			log=log)
+
+	def __del__(self):
+		del self._socket
+
+	def add_command(self, commandObj):
+		with self._scheduled_commands_lock:
+			self._scheduled_commands.append(commandObj)
+
+	def connection_handler(self, handlerObj):  # one thread per SocketServer connection
+		self._count += 1
+		count = self._count
+		_function_ = f'{self.__class__.__name__}[{count}].handle()'
+
+		def send(msg):
+			encoded = bytes(f'{msg}\n', 'utf-8')
+			log.debug(f'{_function_} sending: {msg}')
+			handlerObj.request.sendall(encoded)
+
+		def print_message(arg1, arg2, *args):
+			send(arg1 if isinstance(arg1, str) else arg2)
+
+		def receive() -> str:
+			return str(handlerObj.request.recv(1024), 'utf-8').strip()
+
+		def get_parser():
+			ret = argparse.ArgumentParser("", add_help=True)
+			ret._print_message = print_message
+			subparser = ret.add_subparsers(dest='command', title='Commands')
+			parser2 = subparser.add_parser('test', help='test socket communication')
+			parser2 = subparser.add_parser('schedule', help='schedule command')
+			return ret
+		parser = get_parser()
+
+		cmd = receive()
+		log.info(f'Socket message [{count}]: ' + cmd if len(cmd) < 70 else (cmd[0:66]+' ...'))
+		cmd_args = parser.parse_args(shlex.split(cmd))
+
+		if cmd_args.command == 'test':
+			send('test ok!')
+
+
+# =============================================================================
+class ScheduledCommand:
+	_cmd = None
+	_finished = False
+	_fail_msg = None
+	_exitcode = None
+
+	def __init__(self, cmd):
+		self._cmd = cmd
+
+	def run(self):
+		pass
+
 
 # =============================================================================
 class NotebookServer:
