@@ -263,9 +263,7 @@ class CommandServer:
 			if cmd_args.action == 'test':
 				send('test ok!')
 			elif cmd_args.action == 'schedule':
-				sc = ScheduledCommand(cmd_args)
-				with self._scheduled_commands_lock:
-					self._scheduled_commands.append(sc)
+				self.add_command(ScheduledCommand(cmd_args))
 
 		except Exception as e:
 			log.error(f'Socket exception [{count}]: {str(e)}')
