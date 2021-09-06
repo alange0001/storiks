@@ -207,12 +207,14 @@ class Program:
 
 # =============================================================================
 class CommandServer:
-	_count = 0
+	_count = 0  # client connections counter
+	_stop = False
 	_socket = None
+	_worker = None
 
 	_scheduled_commands_lock = None
 	_scheduled_commands = None
-	_current_command = None
+	_current_command_idx = -1
 
 	def __init__(self):
 		self._scheduled_commands = list()
@@ -223,12 +225,54 @@ class CommandServer:
 			chown=(int(os.getenv('STORIKS_USER_UID')), 0),
 			log=log)
 
+		self._worker = threading.Thread(name='CommandServer.worker', target=lambda: self.worker())
+		self._worker.daemon = True
+		self._worker.start()
+		self._worker.join()
+
 	def __del__(self):
+		self._stop = True
+		c = 0
+		while self._worker.is_alive() and c < 8:
+			time.sleep(0.25)
+			c += 1
 		del self._socket
 
 	def add_command(self, commandObj):
+		last = None
 		with self._scheduled_commands_lock:
 			self._scheduled_commands.append(commandObj)
+			last = len(self._scheduled_commands)-1
+		log.info(f'CommandServer: scheduled command {last}')
+		return last
+
+	def worker(self):
+		log.info('CommandServer: worker started')
+		while not self._stop:
+			current_obj = None
+			current_idx = None
+			with self._scheduled_commands_lock:
+				sl = len(self._scheduled_commands)
+				if sl > 0 and self._current_command_idx < sl-1:
+					self._current_command_idx += 1
+					current_idx = self._current_command_idx
+					current_obj = self._scheduled_commands[current_idx]
+
+			if current_obj is not None:
+				log.info(f'CommandServer: starting scheduled command {current_idx}')
+				current_obj.start()
+				current_status = None
+				while not self._stop and current_status is None:
+					time.sleep(0.5)
+					current_status = current_obj.check_status()
+				if current_status is not None:
+					if current_status == 0:
+						log.info(f'CommandServer: scheduled command {current_idx} terminated with exit code {current_status}')
+					else:
+						log.error(f'CommandServer: scheduled command {current_idx} terminated with exit code {current_status}')
+			else:
+				time.sleep(0.5)
+		log.info('CommandServer: worker finished')
 
 	def connection_handler(self, handlerObj):  # one thread per SocketServer connection
 		self._count += 1
@@ -250,26 +294,67 @@ class CommandServer:
 			ret = argparse.ArgumentParser("", add_help=True)
 			ret._print_message = print_message
 			subparser = ret.add_subparsers(dest='action', title='Available Actions')
-			subparser.add_parser('test', help='test socket communication')
-			ScheduledCommand.register_args(subparser)
+			# -------------------------
+			parser2 = subparser.add_parser('help', help='print help')
+			parser2._print_message = print_message
+			# -------------------------
+			parser2 = subparser.add_parser('test', help='test socket communication')
+			parser2._print_message = print_message
+			# -------------------------
+			parser2 = ScheduledCommand.register_args(subparser)
+			parser2._print_message = print_message
+			# -------------------------
+			parser2 = subparser.add_parser('list', help='list scheduled commands')
+			parser2._print_message = print_message
+			# -------------------------
+			parser2 = subparser.add_parser('status', help='print the status of a schedule command')
+			parser2._print_message = print_message
+			parser2.add_argument('number', type=int, help='command number')
 			return ret
 		try:
 			parser = get_parser()
 
 			cmd = receive()
-			log.info(f'Socket message [{count}]: ' + cmd if len(cmd) < 70 else (cmd[0:66]+' ...'))
+			log.info(f'CommandServer connection [{count}] message: ' + cmd if len(cmd) < 70 else (cmd[0:66]+' ...'))
 			cmd_args = parser.parse_args(shlex.split(cmd))
 
 			if cmd_args.action == 'test':
 				send('test ok!')
+			if cmd_args.action == 'help':
+				parser.print_help()
 			elif cmd_args.action == 'schedule':
-				self.add_command(ScheduledCommand(cmd_args))
+				sc = ScheduledCommand(cmd_args)
+				idx = self.add_command(sc)
+				send(f'command {idx} scheduled')
+			elif cmd_args.action == 'list':
+				fstring = '{:>4}  {:<10}  {}'
+				ret = fstring.format('num.', 'status', 'command')
+				ret += '\n--------------------------------------------------------'
+				sclist = []
+				with self._scheduled_commands_lock:
+					for i in range(len(self._scheduled_commands)):
+						sc = self._scheduled_commands[i]
+						sclist.append([i, sc.status(), sc.command(maxlength=60)])
+				for sline in sclist:
+					ret += '\n' + fstring.format(*sline)
+				send(ret)
+			elif cmd_args.action == 'status':
+				if 0 <= cmd_args.number < len(self._scheduled_commands):
+					with self._scheduled_commands_lock:
+						sc = self._scheduled_commands[cmd_args.number]
+					ret = f'Scheduled command {cmd_args.number}: status = {sc.status()}'
+					if sc.exitcode() not in (None, 0):
+						ret += f'\n\texit code = {sc.exitcode()}; fail message = "{sc.fail_msg()}"'
+					ret += f'\n\tcommand = {sc.command()}'
+					send(ret)
+				else:
+					send(f'scheduled command number is out of range')
 
 		except Exception as e:
-			log.error(f'Socket exception [{count}]: {str(e)}')
+			log.error(f'CommandServer connection [{count}] exception: {str(e)}')
 			send(f'ERROR: {str(e)}')
 
-		log.info(f'Socket closed [{count}].')
+		log.info(f'CommandServer connection [{count}] closed.')
 
 
 # =============================================================================
@@ -277,22 +362,111 @@ class ScheduledCommand:
 	@classmethod
 	def register_args(cls, subparser):
 		parser2 = subparser.add_parser('schedule', help='schedule command')
-		parser2.add_argument('--wait_time', default=0, type=int, help='wait time before execution (s)')
 		parser2.add_argument('--output', type=str, help='output file')
 		parser2.add_argument('cmd', help='command to be executed')
 		parser2.add_argument('cmd_args', nargs=argparse.REMAINDER)
+		return parser2
 
-	_cmd = None
+	_args = None
+	_process = None
+	_thread_stdout = None
+	_thread_stderr = None
+	_started = False
 	_finished = False
-	_fail_msg = None
 	_exitcode = None
+	_fail_msg = ''
+	_output_file = None
 
 	def __init__(self, args):
-		pass
+		self._args = args
 
-	def run(self):
-		pass
+	def start(self):
+		try:
+			cmd = [
+				'su', '-l', os.getenv('STORIKS_USER'), '-c',
+				shlex.join([self._args.cmd] + self._args.cmd_args)
+			]
+			self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+			self._started = True
+			self._thread_stdout = threading.Thread(
+				name='ScheduledCommand.stdout',
+				target=lambda: self._handle_process_output(self._process.stdout))
+			self._thread_stdout.daemon = True
+			self._thread_stdout.start()
+			self._thread_stderr = threading.Thread(
+				name='ScheduledCommand.stderr',
+				target=lambda: self._handle_process_output(self._process.stderr))
+			self._thread_stderr.daemon = True
+			self._thread_stderr.start()
 
+		except Exception as e:
+			self._handle_exception(e)
+
+	def _handle_exception(self, e):
+		self._fail_msg = f'{e.__class__.__name__} exception: {str(e)}'
+		self._exitcode = -990
+		self._finished = True
+		self._started = True
+		log.error(self._fail_msg)
+		if self._process is not None:
+			for p in psutil.Process(self._process.pid).children(recursive=True):
+				p.kill()
+			self._process.kill()
+			try:
+				self._exitcode = self._process.wait(1)
+			except subprocess.TimeoutExpired:
+				return None
+			except Exception as e2:
+				log.error(f'{self.__class__.__name__} unexpected {e.__class__.__name__} exception: {str(e2)}')
+
+	def _handle_process_output(self, output_pipe):
+		try:
+			while not self._finished and output_pipe.readable():
+				line = output_pipe.readline().decode()
+				if len(line) > 0:
+					self._handle_line(line)
+		except Exception as e:
+			self._handle_exception(e)
+
+	def _handle_line(self, line):
+		sys.stderr.write('ScheduledCommand: ' + line)
+
+	def check_status(self):  # None if not started or still running
+		_function_ = f'{self.__class__.__name__}.check_status()'
+		if not self._started:
+			return None
+		if self._finished:
+			return self._exitcode
+		try:
+			st = self._process.wait(0)
+			self._exitcode = st
+			self._finished = True
+			if st != 0:
+				self._fail_msg = f'exit code {st}'
+				log.error(self._fail_msg)
+			return st
+		except subprocess.TimeoutExpired:
+			return None
+		except Exception as e:
+			self._fail_msg = f'unexpected {e.__class__.__name__} exception: {str(e)}'
+			log.error(f'{_function_} unexpected {e.__class__.__name__} exception: {str(e)}')
+			return -999
+
+	def status(self):
+		if self._exitcode is not None and self._exitcode != 0:
+			return 'fail'
+		if self._finished: return 'finished'
+		if self._started: return 'running'
+		return 'scheduled'
+	def command(self, maxlength=None):
+		ret = f'{self._args.cmd} {shlex.join(self._args.cmd_args)}'
+		if maxlength is not None and (0 < maxlength < len(ret)):
+			ret = ret[0:maxlength]
+		return ret
+	def started(self):  return self._started
+	def fail_msg(self): return self._fail_msg
+	def finished(self): return self._finished
+	def exitcode(self): return self._exitcode
 
 # =============================================================================
 class NotebookServer:
