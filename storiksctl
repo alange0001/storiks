@@ -18,6 +18,8 @@ import json
 import getpass
 import argparse
 import traceback
+import socket
+import shlex
 
 # =============================================================================
 import logging
@@ -273,7 +275,7 @@ class Start (Subcommand):
 	_name_ = 'start'
 	@classmethod
 	def register(cls, subparser):
-		parser2 = subparser.add_parser('start', help='Start the main container.')
+		parser2 = subparser.add_parser(cls._name_, help='Start the main container.')
 		parser2.add_argument('-d', '--data_dir', type=str, default=None, required=True,
 			help='Directory used to store both database and access_time3 files.')
 		parser2.add_argument('--data_dev', type=str, default=None, required=False,
@@ -444,7 +446,7 @@ class Stop (Subcommand):
 	_name_ = 'stop'
 	@classmethod
 	def register(cls, subparser):
-		parser2 = subparser.add_parser('stop', help='Stop the main container.')
+		parser2 = subparser.add_parser(cls._name_, help='Stop the main container.')
 		return parser2
 
 	def __init__(self):
@@ -460,7 +462,7 @@ class Status (Subcommand):
 	_name_ = 'status'
 	@classmethod
 	def register(cls, subparser):
-		parser2 = subparser.add_parser('status', help='Return the status of storiks framework.')
+		parser2 = subparser.add_parser(cls._name_, help='Return the status of storiks framework.')
 		parser2.add_argument('--environment',
 							 default=False, action='store_true',
 							 help='Show internal environment variables.')
@@ -525,7 +527,7 @@ class Open (Subcommand):
 	_name_ = 'open'
 	@classmethod
 	def register(cls, subparser):
-		parser2 = subparser.add_parser('open', help='Open the jupyter-notebook interface.')
+		parser2 = subparser.add_parser(cls._name_, help='Open the jupyter-notebook interface.')
 		return parser2
 
 	def __init__(self):
@@ -535,6 +537,33 @@ class Open (Subcommand):
 		self._execute(f'xdg-open \'{url}\'')
 
 Subcommand.add_subclass(Open)
+
+
+# =============================================================================
+class Send (Subcommand):
+	_name_ = 'send'
+	@classmethod
+	def register(cls, subparser):
+		parser2 = subparser.add_parser(cls._name_, help='Send commands to storiksd.')
+		parser2.add_argument('cmd', help='command to be executed')
+		parser2.add_argument('cmd_args', nargs=argparse.REMAINDER)
+		return parser2
+
+	def __init__(self):
+		self._set_proc_name(f'storiksctl {self._name_}')
+		comm_dir = self._get_container_env().get("STORIKS_COMMUNICATION_DIR")
+		if comm_dir is not None:
+			sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+			sock.connect(os.path.join(comm_dir, 'storiksd.socket'))
+
+			cmd = shlex.join([args.cmd] + args.cmd_args)
+			sock.sendall(bytes(cmd, 'utf-8'))
+			print(str(sock.recv(2 * 1024**2), 'utf-8'))
+
+		else:
+			log.error('failed to get the communication dir')
+
+Subcommand.add_subclass(Send)
 
 
 # =============================================================================
