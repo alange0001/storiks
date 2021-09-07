@@ -362,7 +362,13 @@ class ScheduledCommand:
 	@classmethod
 	def register_args(cls, subparser):
 		parser2 = subparser.add_parser('schedule', help='schedule command')
-		parser2.add_argument('--output', type=str, help='output file')
+		parser2.add_argument('--output', type=str,
+				help=f'output file (saved in host:{os.getenv("STORIKS_OUTPUT_DIR")}, guest:/output)')
+		parser2.add_argument('--overwrite', default=False, action='store_true',
+				help='overwrite (truncate) output file')
+		parser2.add_argument('--append', default=False, action='store_true',
+				help='append output file if it exists')
+		parser2.add_argument('--quiet', default=False, action='store_true', help='suppress any output')
 		parser2.add_argument('cmd', help='command to be executed')
 		parser2.add_argument('cmd_args', nargs=argparse.REMAINDER)
 		return parser2
@@ -382,6 +388,20 @@ class ScheduledCommand:
 
 	def start(self):
 		try:
+			if self._args.output is not None:
+				outpath = os.path.join('/output', self._args.output)
+				log.info(f'{self.__class__.__name__}: set output file to "{outpath}"')
+				if os.path.exists(outpath):
+					if os.path.exists(outpath) and self._args.overwrite:
+						self._output_file = open(outpath, 'wt')
+					elif os.path.exists(outpath) and self._args.append:
+						self._output_file = open(outpath, 'at')
+					else:
+						raise Exception(f'Output file "{self._args.output}" exists. '
+								'Use either another filename, --overwrite, or --append.')
+				else:
+					self._output_file = open(outpath, 'xt')
+
 			cmd = [
 				'su', '-l', os.getenv('STORIKS_USER'), '-c',
 				shlex.join([self._args.cmd] + self._args.cmd_args)
@@ -403,7 +423,7 @@ class ScheduledCommand:
 			self._handle_exception(e)
 
 	def _handle_exception(self, e):
-		self._fail_msg = f'{e.__class__.__name__} exception: {str(e)}'
+		self._fail_msg = f'exception ({e.__class__.__name__}): {str(e)}'
 		self._exitcode = -990
 		self._finished = True
 		self._started = True
@@ -413,23 +433,29 @@ class ScheduledCommand:
 				p.kill()
 			self._process.kill()
 			try:
-				self._exitcode = self._process.wait(1)
+				self._exitcode = self._process.wait(2)
 			except subprocess.TimeoutExpired:
-				return None
+				log.error(f'{self.__class__.__name__}: the process is still running')
 			except Exception as e2:
-				log.error(f'{self.__class__.__name__} unexpected {e.__class__.__name__} exception: {str(e2)}')
+				log.error(f'{self.__class__.__name__} unexpected exception ({e.__class__.__name__}): {str(e2)}')
+			if self._output_file is not None:
+				self._output_file.close()
+				self._output_file = False
 
-	def _handle_process_output(self, output_pipe):
+	def _handle_process_output(self, file):
 		try:
-			while not self._finished and output_pipe.readable():
-				line = output_pipe.readline().decode()
-				if len(line) > 0:
+			while not self._finished and file.readable():
+				line = file.readline().decode()
+				if len(line) > 0 and not self._args.quiet:
 					self._handle_line(line)
 		except Exception as e:
 			self._handle_exception(e)
 
 	def _handle_line(self, line):
-		sys.stderr.write('ScheduledCommand: ' + line)
+		if self._output_file is not None:
+			self._output_file.write(line)
+		else:
+			sys.stderr.write('ScheduledCommand: ' + line)
 
 	def check_status(self):  # None if not started or still running
 		_function_ = f'{self.__class__.__name__}.check_status()'
@@ -444,12 +470,15 @@ class ScheduledCommand:
 			if st != 0:
 				self._fail_msg = f'exit code {st}'
 				log.error(self._fail_msg)
+			if self._output_file is not None:
+				self._output_file.close()
+				self._output_file = False
 			return st
 		except subprocess.TimeoutExpired:
 			return None
 		except Exception as e:
-			self._fail_msg = f'unexpected {e.__class__.__name__} exception: {str(e)}'
-			log.error(f'{_function_} unexpected {e.__class__.__name__} exception: {str(e)}')
+			self._fail_msg = f'unexpected exception ({e.__class__.__name__}): {str(e)}'
+			log.error(f'{_function_} unexpected exception ({e.__class__.__name__}): {str(e)}')
 			return -999
 
 	def status(self):
@@ -461,7 +490,7 @@ class ScheduledCommand:
 	def command(self, maxlength=None):
 		ret = f'{self._args.cmd} {shlex.join(self._args.cmd_args)}'
 		if maxlength is not None and (0 < maxlength < len(ret)):
-			ret = ret[0:maxlength]
+			ret = ret[0:maxlength] + '...'
 		return ret
 	def started(self):  return self._started
 	def fail_msg(self): return self._fail_msg
