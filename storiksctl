@@ -517,7 +517,12 @@ class Terminal (Subcommand):
 		if args.root:
 			self._execute(f'docker exec -ti storiks bash')
 		else:
-			self._execute(f'docker exec --user {os.getuid()}:{os.getgid()} -ti storiks bash')
+			self._execute(
+				f'docker exec '
+				f'--user {os.getuid()}:{os.getgid()} '
+				f'-e HOME=/home/user '
+				f'--workdir /output '
+				f'-ti storiks bash')
 
 Subcommand.add_subclass(Terminal)
 

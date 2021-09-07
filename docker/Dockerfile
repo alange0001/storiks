@@ -34,9 +34,6 @@ ENV STORIKS_PATH /opt/storiks/bin:/opt/performancemonitor:/opt/YCSB/bin:/opt/roc
 #     apt update && \
 #     apt install -y vim
 
-ENV HOME /home/user
-WORKDIR /home/user
-
 COPY opt /opt
 
 CMD ["bash"]
