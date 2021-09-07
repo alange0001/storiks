@@ -149,7 +149,7 @@ class Program:
 			with open('/etc/profile.d/storiks.sh', 'wt') as f:
 				storiks_path = os.getenv('STORIKS_PATH')
 				if storiks_path is not None:
-					f.write(f'export PATH="{storiks_path}:$PATH"')
+					f.write(f'export PATH="{storiks_path}:$PATH"\n')
 				for e in envlist:
 					v = os.getenv(e)
 					if v is not None:
