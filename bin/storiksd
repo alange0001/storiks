@@ -244,7 +244,8 @@ class CommandServer:
 		with self._scheduled_commands_lock:
 			self._scheduled_commands.append(commandObj)
 			last = len(self._scheduled_commands)-1
-		log.info(f'CommandServer: scheduled command {last}')
+		commandObj.set_n(last)
+		log.info(f'CommandServer: command number {last} scheduled')
 		return last
 
 	def worker(self):
@@ -306,11 +307,15 @@ class CommandServer:
 			parser2._print_message = print_message
 			# -------------------------
 			parser2 = subparser.add_parser('list', help='list scheduled commands')
+			parser2.add_argument('--json', default=False, action='store_true',
+					help='json format')
 			parser2._print_message = print_message
 			# -------------------------
 			parser2 = subparser.add_parser('status', help='print the status of a schedule command')
-			parser2._print_message = print_message
 			parser2.add_argument('number', type=int, help='command number')
+			parser2.add_argument('--json', default=False, action='store_true',
+					help='json format')
+			parser2._print_message = print_message
 			return ret
 		try:
 			parser = get_parser()
@@ -328,22 +333,31 @@ class CommandServer:
 				idx = self.add_command(sc)
 				send(f'command {idx} scheduled')
 			elif cmd_args.action == 'list':
-				fstring = '{:>4}  {:<10}  {}'
-				ret = fstring.format('num.', 'status', 'command')
-				ret += '\n--------------------------------------------------------'
 				sclist = []
 				with self._scheduled_commands_lock:
 					for i in range(len(self._scheduled_commands)):
 						sc = self._scheduled_commands[i]
-						sclist.append([i, sc.get_status(), sc.get_command(maxlength=60)])
-				for sline in sclist:
-					ret += '\n' + fstring.format(*sline)
+						sc_values = {
+							'number'  : i,
+							'status'  : sc.get_status(),
+							'command' : sc.get_command(),
+						}
+						sclist.append(sc_values)
+				if cmd_args.json:
+					ret = json.dumps(sclist)
+				else:
+					fstring = '{:>4}  {:<10}  {}'
+					ret = fstring.format('num.', 'status', 'command')
+					ret += '\n--------------------------------------------------------'
+					for sline in sclist:
+						aux = sline['command'] if len(sline['command']) <= 60 else (sline['command'][0:56] + ' ...')
+						ret += '\n' + fstring.format(sline['number'], sline['status'], aux)
 				send(ret)
 			elif cmd_args.action == 'status':
 				if 0 <= cmd_args.number < len(self._scheduled_commands):
 					with self._scheduled_commands_lock:
 						sc = self._scheduled_commands[cmd_args.number]
-					send(sc.describe())
+					send(sc.describe(cmd_args.json))
 				else:
 					send(f'scheduled command number is out of range')
 
@@ -372,6 +386,7 @@ class ScheduledCommand:
 		parser2.add_argument('cmd_args', nargs=argparse.REMAINDER)
 		return parser2
 
+	_n = -1
 	_args = None
 	_process = None
 	_thread_stdout = None
@@ -385,6 +400,9 @@ class ScheduledCommand:
 
 	def __init__(self, args):
 		self._args = args
+
+	def set_n(self, n):
+		self._n = n
 
 	def start(self):
 		try:
@@ -499,12 +517,20 @@ class ScheduledCommand:
 	def fail_msg(self): return self._fail_msg
 	def finished(self): return self._finished
 	def exitcode(self): return self._exitcode
-	def describe(self):
-		return f'ScheduledCommand:' \
-			   f'\n\t  command = {self.get_command()}' \
-			   f'\n\t   status = {self.get_status()}' \
-			   f'\n\texit code = {self.exitcode() if self.exitcode() is not None else ""}' \
-			   f'\n\tfaile msg = {self.fail_msg()}'
+	def describe(self, json_format=False):
+		aux = {
+			'number': self._n,
+			'command': self.get_command(),
+			'exitcode': self._exitcode,
+			'fail_msg': self._fail_msg,
+		}
+		if json_format:
+			ret = json.dumps(aux)
+		else:
+			ret = f'ScheduledCommand:'
+			for k, v in aux.items():
+				ret += '\n\t{:>10} = {}'.format(k, v)
+		return ret
 
 # =============================================================================
 class NotebookServer:
