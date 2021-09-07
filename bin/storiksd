@@ -22,6 +22,7 @@ import traceback
 import shlex
 import shutil
 import json
+import lzma
 import storiks
 from storiks.util import coalesce, getenv_default, get_recursive, env_as_bool
 
@@ -364,6 +365,8 @@ class ScheduledCommand:
 				help='overwrite (truncate) output file')
 		parser2.add_argument('--append', default=False, action='store_true',
 				help='append output file if it exists')
+		parser2.add_argument('--compress', default=False, action='store_true',
+				help='compress output using xz format (lzma module)')
 		parser2.add_argument('--quiet', default=False, action='store_true', help='suppress any output')
 		parser2.add_argument('cmd', help='command to be executed')
 		parser2.add_argument('cmd_args', nargs=argparse.REMAINDER)
@@ -378,25 +381,28 @@ class ScheduledCommand:
 	_exitcode = None
 	_fail_msg = ''
 	_output_file = None
+	_output_file_lock = None
 
 	def __init__(self, args):
 		self._args = args
 
 	def start(self):
 		try:
-			if self._args.output is not None:
+			if not self._args.quiet and self._args.output is not None:
+				self._output_file_lock = threading.Lock()
+				open_f = open if not self._args.compress else lzma.open
 				outpath = os.path.join('/output', self._args.output)
 				log.info(f'{self.__class__.__name__}: set output file to "{outpath}"')
 				if os.path.exists(outpath):
-					if os.path.exists(outpath) and self._args.overwrite:
-						self._output_file = open(outpath, 'wt')
-					elif os.path.exists(outpath) and self._args.append:
-						self._output_file = open(outpath, 'at')
+					if self._args.overwrite:
+						self._output_file = open_f(outpath, 'wt')
+					elif self._args.append:
+						self._output_file = open_f(outpath, 'at')
 					else:
 						raise Exception(f'Output file "{self._args.output}" exists. '
 								'Use either another filename, --overwrite, or --append.')
 				else:
-					self._output_file = open(outpath, 'xt')
+					self._output_file = open_f(outpath, 'xt')
 
 			cmd = [
 				'su', '-l', os.getenv('STORIKS_USER'), '-c',
@@ -442,14 +448,15 @@ class ScheduledCommand:
 		try:
 			while not self._finished and file.readable():
 				line = file.readline().decode()
-				if len(line) > 0 and not self._args.quiet:
+				if not self._args.quiet and len(line) > 0:
 					self._handle_line(line)
 		except Exception as e:
 			self._handle_exception(e)
 
-	def _handle_line(self, line):
+	def _handle_line(self, line):  # called by 2 threads (stdout and stdin)
 		if self._output_file is not None:
-			self._output_file.write(line)
+			with self._output_file_lock:
+				self._output_file.write(line)
 		else:
 			sys.stderr.write('ScheduledCommand: ' + line)
 
