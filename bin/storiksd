@@ -23,6 +23,7 @@ import shlex
 import shutil
 import json
 import lzma
+import datetime
 import storiks
 from storiks.util import coalesce, getenv_default, get_recursive, env_as_bool
 
@@ -358,27 +359,27 @@ class CommandServer:
 				with self._scheduled_commands_lock:
 					for i in range(len(self._scheduled_commands)):
 						sc = self._scheduled_commands[i]
-						sc_values = {
-							'number'  : i,
-							'status'  : sc.get_status(),
-							'command' : sc.get_command(),
-						}
-						sclist.append(sc_values)
+						sclist.append(sc.describe('dict'))
 				if cmd_args.json:
 					ret = json.dumps(sclist)
 				else:
-					fstring = '{:>4}  {:<10}  {}'
-					ret = fstring.format('num.', 'status', 'command')
-					ret += '\n--------------------------------------------------------'
-					for sline in sclist:
-						aux = sline['command'] if len(sline['command']) <= 60 else (sline['command'][0:56] + ' ...')
-						ret += '\n' + fstring.format(sline['number'], sline['status'], aux)
+					fstring = '{:>4}  {:<10}  {:<19}  {:<19}  {}'
+					ret = fstring.format('num.', 'status', 'start', 'end', 'command')
+					ret += '\n----------------------------------------------------------------------------------------'
+					for i in sclist:
+						aux = i['command'] if len(i['command']) <= 60 else (i['command'][0:56] + ' ...')
+						ret += '\n' + fstring.format(
+							i['number'],
+							i['status'],
+							i['start'] if i['start'] is not None else '',
+							i['end'] if i['end'] is not None else '',
+							aux)
 				send(ret)
 
 			elif cmd_args.action == 'status':
 				sc = self.get_scheduled_command(cmd_args.number)
 				if sc is not None:
-					send(sc.describe(cmd_args.json))
+					send(sc.describe('json' if cmd_args.json else 'text'))
 				else:
 					send(f'ERROR: there is no scheduled commands or the informed number is out of range')
 
@@ -433,6 +434,8 @@ class ScheduledCommand:
 	_status = None
 	_exitcode = None
 	_fail_msg = ''
+	_time_start = None
+	_time_end = None
 	_cancel_flag = False
 	_output_file = None
 	_output_file_lock = None
@@ -476,10 +479,11 @@ class ScheduledCommand:
 
 			cmd = [
 				'su', '-l', os.getenv('STORIKS_USER'), '-c',
-				shlex.join([self._args.cmd] + self._args.cmd_args)
+				'cd /output && ' + shlex.join([self._args.cmd] + self._args.cmd_args)
 			]
 			self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 			self._status = self.ST_RUNNING
+			self._time_start = datetime.datetime.now()
 
 			self._thread_stdout = threading.Thread(
 				name='ScheduledCommand.stdout',
@@ -506,6 +510,7 @@ class ScheduledCommand:
 					self._exitcode = self._process.wait(4)
 				except subprocess.TimeoutExpired:
 					log.error(f'{self.__class__.__name__}: the process is still running')
+				self._time_end = datetime.datetime.now()
 			if self._output_file is not None:
 				self._output_file.close()
 				self._output_file = False
@@ -555,6 +560,7 @@ class ScheduledCommand:
 			st = self._process.wait(0)
 			self._exitcode = st
 			self._status = self.ST_FINISHED if st == 0 else self.ST_FAIL
+			self._time_end = datetime.datetime.now()
 			if st != 0:
 				self._fail_msg = f'exit code {st}'
 				log.error(self._fail_msg)
@@ -580,20 +586,24 @@ class ScheduledCommand:
 	def fail_msg(self): return self._fail_msg
 	def exitcode(self): return self._exitcode
 	def n(self): return self._n
-	def describe(self, json_format=False):
+	def describe(self, output_format='text'):
 		aux = {
 			'number'   : self._n,
 			'command'  : self.get_command(),
 			'status'   : self.get_status(),
+			'start'    : self._time_start.strftime('%Y-%m-%d %H:%M:%S') if self._time_start is not None else None,
+			'end'      : self._time_end.strftime('%Y-%m-%d %H:%M:%S') if self._time_end is not None else None,
 			'exitcode' : self._exitcode,
 			'fail_msg' : self._fail_msg,
 		}
-		if json_format:
+		if output_format == 'json':
 			ret = json.dumps(aux)
-		else:
+		elif output_format == 'text':
 			ret = f'ScheduledCommand:'
 			for k, v in aux.items():
 				ret += '\n\t{:>10} = {}'.format(k, v if v is not None else '')
+		if output_format == 'dict':
+			ret = aux
 		return ret
 
 
