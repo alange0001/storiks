@@ -367,7 +367,7 @@ class CommandServer:
 					ret = fstring.format('num.', 'status', 'start', 'end', 'command')
 					ret += '\n----------------------------------------------------------------------------------------'
 					for i in sclist:
-						aux = i['command'] if len(i['command']) <= 60 else (i['command'][0:56] + ' ...')
+						aux = i['command'] if len(i['command']) <= 50 else (i['command'][0:46] + ' ...')
 						ret += '\n' + fstring.format(
 							i['number'],
 							i['status'],
