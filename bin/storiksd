@@ -260,12 +260,14 @@ class CommandServer:
 					current_idx = self._current_command_idx
 					current_obj = self._scheduled_commands[current_idx]
 
-			if current_obj is not None:
+			if current_obj is not None and current_obj.scheduled():
 				log.info(f'CommandServer: starting scheduled command {current_idx}')
 				current_obj.start()
 				current_status = None
 				while not self._stop and current_status is None:
 					time.sleep(0.5)
+					if current_obj.cancel_flag():
+						current_obj.cancel()
 					current_status = current_obj.check_status()
 				if current_status is not None:
 					if current_status == 0:
@@ -275,6 +277,15 @@ class CommandServer:
 			else:
 				time.sleep(0.5)
 		log.info('CommandServer: worker finished')
+
+	def get_scheduled_command(self, number):
+		ret = None
+		with self._scheduled_commands_lock:
+			if number is None:
+				number = len(self._scheduled_commands) - 1
+			if 0 <= number < len(self._scheduled_commands):
+				ret = self._scheduled_commands[number]
+		return ret
 
 	def connection_handler(self, handlerObj):  # one thread per SocketServer connection
 		self._count += 1
@@ -312,11 +323,18 @@ class CommandServer:
 			parser2._print_message = print_message
 			# -------------------------
 			parser2 = subparser.add_parser('status', help='print the status of a schedule command')
-			parser2.add_argument('number', type=int, help='command number')
+			parser2.add_argument('number', default=None, type=int, nargs='?',
+					help='command number')
 			parser2.add_argument('--json', default=False, action='store_true',
 					help='json format')
 			parser2._print_message = print_message
+			# -------------------------
+			parser2 = subparser.add_parser('cancel', help='cancel a schedule command')
+			parser2.add_argument('number', default=None, type=int, nargs='?',
+					help='command number')
+			parser2._print_message = print_message
 			return ret
+
 		try:
 			parser = get_parser()
 
@@ -326,12 +344,15 @@ class CommandServer:
 
 			if cmd_args.action == 'test':
 				send('test ok!')
+
 			if cmd_args.action == 'help':
 				parser.print_help()
+
 			elif cmd_args.action == 'schedule':
 				sc = ScheduledCommand(cmd_args)
 				idx = self.add_command(sc)
 				send(f'command {idx} scheduled')
+
 			elif cmd_args.action == 'list':
 				sclist = []
 				with self._scheduled_commands_lock:
@@ -353,13 +374,24 @@ class CommandServer:
 						aux = sline['command'] if len(sline['command']) <= 60 else (sline['command'][0:56] + ' ...')
 						ret += '\n' + fstring.format(sline['number'], sline['status'], aux)
 				send(ret)
+
 			elif cmd_args.action == 'status':
-				if 0 <= cmd_args.number < len(self._scheduled_commands):
-					with self._scheduled_commands_lock:
-						sc = self._scheduled_commands[cmd_args.number]
+				sc = self.get_scheduled_command(cmd_args.number)
+				if sc is not None:
 					send(sc.describe(cmd_args.json))
 				else:
-					send(f'scheduled command number is out of range')
+					send(f'ERROR: there is no scheduled commands or the informed number is out of range')
+
+			elif cmd_args.action == 'cancel':
+				sc = self.get_scheduled_command(cmd_args.number)
+				if sc is not None:
+					sc.cancel_flag(True)
+					if sc.exitcode() is None:
+						send(f'command number {sc.n()} scheduled to cancel')
+					else:
+						send(f'command number {sc.n()} already finished with exit code {sc.exitcode()}')
+				else:
+					send(f'ERROR: there is no scheduled commands or the informed number is out of range')
 
 		except Exception as e:
 			log.error(f'CommandServer connection [{count}] exception: {str(e)}')
@@ -370,6 +402,13 @@ class CommandServer:
 
 # =============================================================================
 class ScheduledCommand:
+	ST_SCHEDULED = 0
+	ST_CANCELED  = 1
+	ST_RUNNING   = 2
+	ST_FINISHED  = 3
+	ST_FAIL      = 4
+	STATUS_NAMES = ['scheduled', 'canceled', 'running', 'finished', 'fail']
+
 	@classmethod
 	def register_args(cls, subparser):
 		parser2 = subparser.add_parser('schedule', help='schedule command')
@@ -391,21 +430,30 @@ class ScheduledCommand:
 	_process = None
 	_thread_stdout = None
 	_thread_stderr = None
-	_started = False
-	_finished = False
+	_status = None
 	_exitcode = None
 	_fail_msg = ''
+	_cancel_flag = False
 	_output_file = None
 	_output_file_lock = None
 
 	def __init__(self, args):
 		self._args = args
+		self._status = self.ST_SCHEDULED
 
 	def set_n(self, n):
 		self._n = n
 
 	def start(self):
 		try:
+			if self._status == self.ST_SCHEDULED and self._cancel_flag:
+				self._status = self.ST_CANCELED
+
+			if self._status != self.ST_SCHEDULED:
+				raise Exception(f'Command number {self._n} should have the status '
+								f'"{self.STATUS_NAMES[self.ST_SCHEDULED]}," but it has the '
+								f'status "{self.STATUS_NAMES[self._status]}."')
+
 			if not self._args.quiet and self._args.output is not None:
 				self._output_file_lock = threading.Lock()
 				open_f = open if not self._args.compress else lzma.open
@@ -417,17 +465,22 @@ class ScheduledCommand:
 					elif self._args.append:
 						self._output_file = open_f(outpath, 'at')
 					else:
-						raise Exception(f'Output file "{self._args.output}" exists. '
+						raise Exception(f'Output file "{self._args.output}" already exists. '
 								'Use either another filename, --overwrite, or --append.')
 				else:
 					self._output_file = open_f(outpath, 'xt')
+				try:
+					os.chown(outpath, int(os.getenv('STORIKS_USER_UID')), int(os.getenv('STORIKS_USER_GID')))
+				except Exception as e:
+					raise Exception(f'failed to set the owner of file {self._args.output}: {str(e)}')
 
 			cmd = [
 				'su', '-l', os.getenv('STORIKS_USER'), '-c',
 				shlex.join([self._args.cmd] + self._args.cmd_args)
 			]
 			self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-			self._started = True
+			self._status = self.ST_RUNNING
+
 			self._thread_stdout = threading.Thread(
 				name='ScheduledCommand.stdout',
 				target=lambda: self._handle_process_output(self._process.stdout))
@@ -442,29 +495,45 @@ class ScheduledCommand:
 		except Exception as e:
 			self._handle_exception(e)
 
-	def _handle_exception(self, e):
-		self._fail_msg = f'exception ({e.__class__.__name__}): {str(e)}'
-		self._exitcode = -990
-		self._finished = True
-		self._started = True
-		log.error(self._fail_msg)
-		if self._process is not None:
-			for p in psutil.Process(self._process.pid).children(recursive=True):
-				p.kill()
-			self._process.kill()
-			try:
-				self._exitcode = self._process.wait(2)
-			except subprocess.TimeoutExpired:
-				log.error(f'{self.__class__.__name__}: the process is still running')
-			except Exception as e2:
-				log.error(f'{self.__class__.__name__} unexpected exception ({e.__class__.__name__}): {str(e2)}')
+	def _kill_and_close(self):
+		try:
+			if self._process is not None:
+				self._process.kill()
+				time.sleep(0.2)
+				for p in psutil.Process(self._process.pid).children(recursive=True):
+					p.kill()
+				try:
+					self._exitcode = self._process.wait(4)
+				except subprocess.TimeoutExpired:
+					log.error(f'{self.__class__.__name__}: the process is still running')
 			if self._output_file is not None:
 				self._output_file.close()
 				self._output_file = False
+		except Exception as e2:
+			log.error(f'{self.__class__.__name__} unexpected exception ({e.__class__.__name__}): {str(e2)}')
+
+	def cancel_flag(self, val=None):
+		if val is not None:
+			self._cancel_flag = val
+		return self._cancel_flag
+
+	def cancel(self):
+		if self._status == self.ST_SCHEDULED:
+			self._status = self.ST_CANCELED
+		elif self._status == self.ST_RUNNING:
+			self._status = self.ST_CANCELED
+			self._kill_and_close()
+
+	def _handle_exception(self, e):
+		self._fail_msg = f'exception ({e.__class__.__name__}): {str(e)}'
+		self._exitcode = -990
+		self._status = self.ST_FAIL
+		log.error(self._fail_msg)
+		self._kill_and_close()
 
 	def _handle_process_output(self, file):
 		try:
-			while not self._finished and file.readable():
+			while not self._status == self.ST_RUNNING and file.readable():
 				line = file.readline().decode()
 				if not self._args.quiet and len(line) > 0:
 					self._handle_line(line)
@@ -480,14 +549,12 @@ class ScheduledCommand:
 
 	def check_status(self):  # None if not started or still running
 		_function_ = f'{self.__class__.__name__}.check_status()'
-		if not self._started:
-			return None
-		if self._finished:
+		if self._status != self.ST_RUNNING:
 			return self._exitcode
 		try:
 			st = self._process.wait(0)
 			self._exitcode = st
-			self._finished = True
+			self._status = self.ST_FINISHED if st == 0 else self.ST_FAIL
 			if st != 0:
 				self._fail_msg = f'exit code {st}'
 				log.error(self._fail_msg)
@@ -502,27 +569,24 @@ class ScheduledCommand:
 			log.error(f'{_function_} unexpected exception ({e.__class__.__name__}): {str(e)}')
 			return -999
 
-	def get_status(self):
-		if self._exitcode is not None and self._exitcode != 0:
-			return 'fail'
-		if self._finished: return 'finished'
-		if self._started: return 'running'
-		return 'scheduled'
+	def get_status(self): return self.STATUS_NAMES[self._status]
 	def get_command(self, maxlength=None):
 		ret = f'{self._args.cmd} {shlex.join(self._args.cmd_args)}'
 		if maxlength is not None and (0 < maxlength < len(ret)):
 			ret = ret[0:maxlength] + '...'
 		return ret
-	def started(self):  return self._started
+	def scheduled(self):  return (self._status == self.ST_SCHEDULED)
+	def running(self): return (self._status == self.ST_RUNNING)
 	def fail_msg(self): return self._fail_msg
-	def finished(self): return self._finished
 	def exitcode(self): return self._exitcode
+	def n(self): return self._n
 	def describe(self, json_format=False):
 		aux = {
-			'number': self._n,
-			'command': self.get_command(),
-			'exitcode': self._exitcode,
-			'fail_msg': self._fail_msg,
+			'number'   : self._n,
+			'command'  : self.get_command(),
+			'status'   : self.get_status(),
+			'exitcode' : self._exitcode,
+			'fail_msg' : self._fail_msg,
 		}
 		if json_format:
 			ret = json.dumps(aux)
@@ -531,6 +595,7 @@ class ScheduledCommand:
 			for k, v in aux.items():
 				ret += '\n\t{:>10} = {}'.format(k, v)
 		return ret
+
 
 # =============================================================================
 class NotebookServer:
