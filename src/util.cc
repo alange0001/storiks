@@ -110,7 +110,20 @@ void CommunicationDir::savePID() {
 		if (!stream.fail()) {
 			spdlog::warn("checking the existence of a process with PID = {}", pid);
 			if (std::filesystem::exists(format("/proc/{}", pid).c_str())) {
-				throw std::runtime_error(format("there is another instance of storiks running with PID={}", pid).c_str());
+				std::ifstream stream_stat(format("/proc/{}/status", pid).c_str());
+				if (!stream_stat.fail()) {
+					std::string aux;
+					std::smatch sm;
+					while (std::getline(stream_stat, aux)) {
+						std::regex_search(aux, sm, std::regex("^State:\\s+([\\w])\\s+(.*)"));
+						if (sm.size() > 1) {
+							spdlog::info("process with PID = {} has state {} {}", pid, sm.str(1), sm.str(2));
+							if (sm.str(1) != "Z")
+								throw std::runtime_error(format("there is another instance of storiks running with PID={}", pid).c_str());
+
+						}
+					}
+				}
 			}
 		}
 	}
