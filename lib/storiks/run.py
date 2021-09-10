@@ -38,9 +38,8 @@ def status(number=''):
 def cancel(number=''):
 	print(_storiksd_send(f'cancel {number}'))
 
-def schedule(cmd, quiet=False, output=None, append=False, overwrite=False, compress=False):
+def schedule(cmd, output=None, append=False, overwrite=False, compress=False):
 	prefix_cmd = ['schedule']
-	if quiet is True: prefix_cmd.append('--quiet')
 	if output is not None: prefix_cmd += ['--output', output]
 	if append is True: prefix_cmd.append('--append')
 	if overwrite is True: prefix_cmd.append('--overwrite')

@@ -261,20 +261,22 @@ class CommandServer:
 					current_idx = self._current_command_idx
 					current_obj = self._scheduled_commands[current_idx]
 
-			if current_obj is not None and current_obj.scheduled():
+			if current_obj is not None and current_obj.scheduled:
 				log.info(f'CommandServer: starting scheduled command {current_idx}')
 				current_obj.start()
-				current_status = None
-				while not self._stop and current_status is None:
+				exitcode = None
+				while not self._stop and exitcode is None:
 					time.sleep(0.5)
 					if current_obj.cancel_flag():
 						current_obj.cancel()
-					current_status = current_obj.check_status()
-				if current_status is not None:
-					if current_status == 0:
-						log.info(f'CommandServer: scheduled command {current_idx} terminated with exit code {current_status}')
+					exitcode = current_obj.exitcode
+				if exitcode is not None:
+					msg = f'CommandServer: scheduled command {current_idx} terminated ' \
+					      f'with exit code {exitcode}'
+					if exitcode == 0:
+						log.info(msg)
 					else:
-						log.error(f'CommandServer: scheduled command {current_idx} terminated with exit code {current_status}')
+						log.error(msg)
 			else:
 				time.sleep(0.5)
 		log.info('CommandServer: worker finished')
@@ -359,7 +361,7 @@ class CommandServer:
 				with self._scheduled_commands_lock:
 					for i in range(len(self._scheduled_commands)):
 						sc = self._scheduled_commands[i]
-						sclist.append(sc.describe('dict'))
+						sclist.append(sc.info('dict'))
 				if cmd_args.json:
 					ret = json.dumps(sclist)
 				else:
@@ -379,7 +381,7 @@ class CommandServer:
 			elif cmd_args.action == 'status':
 				sc = self.get_scheduled_command(cmd_args.number)
 				if sc is not None:
-					send(sc.describe('json' if cmd_args.json else 'text'))
+					send(sc.info('json' if cmd_args.json else 'text'))
 				else:
 					send(f'ERROR: there is no scheduled commands or the informed number is out of range')
 
@@ -387,10 +389,10 @@ class CommandServer:
 				sc = self.get_scheduled_command(cmd_args.number)
 				if sc is not None:
 					sc.cancel_flag(True)
-					if sc.exitcode() is None:
-						send(f'command number {sc.n()} scheduled to cancel')
+					if sc.exitcode is None:
+						send(f'command number {sc.number} scheduled to cancel')
 					else:
-						send(f'command number {sc.n()} already finished with exit code {sc.exitcode()}')
+						send(f'command number {sc.number} already finished with exit code {sc.exitcode}')
 				else:
 					send(f'ERROR: there is no scheduled commands or the informed number is out of range')
 
@@ -421,7 +423,6 @@ class ScheduledCommand:
 				help='append output file if it exists')
 		parser2.add_argument('--compress', default=False, action='store_true',
 				help='compress output using xz format (lzma module)')
-		parser2.add_argument('--quiet', default=False, action='store_true', help='suppress any output')
 		parser2.add_argument('cmd', help='command to be executed')
 		parser2.add_argument('cmd_args', nargs=argparse.REMAINDER)
 		return parser2
@@ -429,16 +430,17 @@ class ScheduledCommand:
 	_n = -1
 	_args = None
 	_process = None
-	_thread_stdout = None
-	_thread_stderr = None
+	_thread_wait   = None
 	_status = None
 	_exitcode = None
 	_fail_msg = ''
+	_fail_msg_lock = None
 	_time_start = None
 	_time_end = None
-	_cancel_flag = False
 	_output_file = None
-	_output_file_lock = None
+	_wait_active = False
+	_stop = False
+	_cancel_flag = False
 
 	def __init__(self, args):
 		self._args = args
@@ -448,17 +450,23 @@ class ScheduledCommand:
 		self._n = n
 
 	def start(self):
+		_function_ = f'{self.__class__.__name__}.start()'
+		log.debug(_function_)
+
+		self._output_file_lock = threading.Lock()
+		self._fail_msg_lock = threading.Lock()
+
 		try:
-			if self._status == self.ST_SCHEDULED and self._cancel_flag:
-				self._status = self.ST_CANCELED
+			if self._status == self.ST_CANCELED:
+				log.info(f'{self.__class__.__name__} number {self._n} was canceled')
+				return
 
 			if self._status != self.ST_SCHEDULED:
 				raise Exception(f'Command number {self._n} should have the status '
 								f'"{self.STATUS_NAMES[self.ST_SCHEDULED]}," but it has the '
 								f'status "{self.STATUS_NAMES[self._status]}."')
 
-			if not self._args.quiet and self._args.output is not None:
-				self._output_file_lock = threading.Lock()
+			if self._args.output is not None:
 				open_f = open if not self._args.compress else lzma.open
 				outpath = os.path.join('/output', self._args.output)
 				log.info(f'{self.__class__.__name__}: set output file to "{outpath}"')
@@ -472,130 +480,170 @@ class ScheduledCommand:
 								'Use either another filename, --overwrite, or --append.')
 				else:
 					self._output_file = open_f(outpath, 'xt')
-				try:
-					os.chown(outpath, int(os.getenv('STORIKS_USER_UID')), int(os.getenv('STORIKS_USER_GID')))
-				except Exception as e:
-					raise Exception(f'failed to set the owner of file {self._args.output}: {str(e)}')
 
-			cmd = [
-				'su', '-l', os.getenv('STORIKS_USER'), '-c',
-				'cd /output && ' + shlex.join([self._args.cmd] + self._args.cmd_args)
-			]
-			self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+				if os.getuid() == 0:
+					try:
+						os.chown(outpath, int(os.getenv('STORIKS_USER_UID')), int(os.getenv('STORIKS_USER_GID')))
+					except Exception as e:
+						raise Exception(f'failed to set the owner of file {self._args.output}: {str(e)}')
+
+			if os.getuid() == 0:
+				cmd = ['su', '-l', os.getenv('STORIKS_USER'), '-c']
+			else:
+				cmd = ['bash', '-c']
+			cmd.append('cd /output && ' + shlex.join([self._args.cmd] + self._args.cmd_args))
+			log.debug(shlex.join(cmd))
+			process_output = self._output_file if self._output_file is not None else subprocess.DEVNULL
+			self._process = subprocess.Popen(cmd, stdout=process_output, stderr=process_output)
 			self._status = self.ST_RUNNING
 			self._time_start = datetime.datetime.now()
+			log.info(f'{self.__class__.__name__} number {self._n} started with pid={self._process.pid}')
 
-			self._thread_stdout = threading.Thread(
-				name='ScheduledCommand.stdout',
-				target=lambda: self._handle_process_output(self._process.stdout))
-			self._thread_stdout.daemon = True
-			self._thread_stdout.start()
-			self._thread_stderr = threading.Thread(
-				name='ScheduledCommand.stderr',
-				target=lambda: self._handle_process_output(self._process.stderr))
-			self._thread_stderr.daemon = True
-			self._thread_stderr.start()
+			self._thread_wait = threading.Thread(
+				name='ScheduledCommand.wait',
+				target=lambda: self._wait())
+			self._thread_wait.daemon = True
+			self._thread_wait.start()
 
 		except Exception as e:
-			self._handle_exception(e)
-
-	def _kill_and_close(self):
-		try:
+			e_msg = f'{e.__class__.__name__}: {str(e)}'
+			self._status = self.ST_FAIL
+			self._exitcode = -9
+			self._add_fail_msg(e_msg)
+			log.error(f'exception when starting {self.__class__.__name__} number {self._n}: {e_msg}')
 			if self._process is not None:
-				self._process.kill()
-				time.sleep(0.2)
-				for p in psutil.Process(self._process.pid).children(recursive=True):
-					p.kill()
-				try:
-					self._exitcode = self._process.wait(4)
-				except subprocess.TimeoutExpired:
-					log.error(f'{self.__class__.__name__}: the process is still running')
-				self._time_end = datetime.datetime.now()
+				self._process.send_signal(signal.SIGTERM)
 			if self._output_file is not None:
 				self._output_file.close()
-				self._output_file = False
-		except Exception as e2:
-			log.error(f'{self.__class__.__name__} unexpected exception ({e.__class__.__name__}): {str(e2)}')
+				self._output_file = None
+
+		log.debug(f'{_function_}: finished')
+
+	def stop(self):
+		if self._stop: return
+		_function_ = f'{self.__class__.__name__}.stop()'
+		log.debug(_function_)
+		if self._status == self.ST_RUNNING and self._process is not None:
+			self._stop = True
+			log.info(f'{self.__class__.__name__} number {self._n}: send SIGTERM')
+			self._process.send_signal(signal.SIGTERM)
+
+			for i in range(15 * 4):
+				if not self._wait_active: break
+				time.sleep(0.25)
+
+			if self._wait_active:
+				log.warning(
+					f'wait thread is still running in {self.__class__.__name__} '
+					f'number {self._n} pid {self._process.pid}')
+				self._process.kill()
+		log.debug(f'{_function_}: finished')
+
+	def cancel(self):
+		_function_ = f'{self.__class__.__name__}.cancel()'
+		log.debug(_function_)
+		log.info(f'{self.__class__.__name__} number {self._n}: cancel (current status={self.STATUS_NAMES[self._status]})')
+		if self._status == self.ST_SCHEDULED:
+			self._status = self.ST_CANCELED
+		elif self._status == self.ST_RUNNING:
+			self.stop()
+		log.debug(f'{_function_}: finished')
 
 	def cancel_flag(self, val=None):
 		if val is not None:
 			self._cancel_flag = val
 		return self._cancel_flag
 
-	def cancel(self):
-		if self._status == self.ST_SCHEDULED:
-			self._status = self.ST_CANCELED
-		elif self._status == self.ST_RUNNING:
-			self._status = self.ST_CANCELED
-			self._kill_and_close()
-
-	def _handle_exception(self, e):
-		self._fail_msg = f'exception ({e.__class__.__name__}): {str(e)}'
-		self._exitcode = -990
-		self._status = self.ST_FAIL
-		log.error(self._fail_msg)
-		self._kill_and_close()
-
-	def _handle_process_output(self, file):
+	def _wait(self):
+		_function_ = f'{self.__class__.__name__}._wait()'
+		log.debug(_function_)
+		self._wait_active = True
 		try:
-			while not self._status == self.ST_RUNNING and file.readable():
-				line = file.readline().decode()
-				if not self._args.quiet and len(line) > 0:
-					self._handle_line(line)
-		except Exception as e:
-			self._handle_exception(e)
+			children1 = []
+			while True:
+				try:
+					children1 = psutil.Process(self._process.pid).children(recursive=True)
+				except Exception as e:
+					log.warning(
+						f'{self.__class__.__name__} number {self._n}: failed to get the children processes ({str(e)})')
+				try:
+					st = self._process.wait(2)
+					break
+				except subprocess.TimeoutExpired:
+					pass
 
-	def _handle_line(self, line):  # called by 2 threads (stdout and stdin)
-		if self._output_file is not None:
-			with self._output_file_lock:
-				self._output_file.write(line)
-		else:
-			sys.stderr.write('ScheduledCommand: ' + line)
-
-	def check_status(self):  # None if not started or still running
-		_function_ = f'{self.__class__.__name__}.check_status()'
-		if self._status != self.ST_RUNNING:
-			return self._exitcode
-		try:
-			st = self._process.wait(0)
+			self._stop = True
 			self._exitcode = st
 			self._status = self.ST_FINISHED if st == 0 else self.ST_FAIL
 			self._time_end = datetime.datetime.now()
-			if st != 0:
-				self._fail_msg = f'exit code {st}'
-				log.error(self._fail_msg)
-			if self._output_file is not None:
-				self._output_file.close()
-				self._output_file = False
-			return st
-		except subprocess.TimeoutExpired:
-			return None
-		except Exception as e:
-			self._fail_msg = f'unexpected exception ({e.__class__.__name__}): {str(e)}'
-			log.error(f'{_function_} unexpected exception ({e.__class__.__name__}): {str(e)}')
-			return -999
+			if st == 0:
+				log.info(f'{self.__class__.__name__} number {self._n} pid {self._process.pid} finished with exit code {st}')
+			else:
+				self._add_fail_msg(f'exit code {st}')
+				log.error(f'{self.__class__.__name__} number {self._n} pid {self._process.pid} finished with exit code {st}')
 
-	def get_status(self): return self.STATUS_NAMES[self._status]
-	def get_command(self, maxlength=None):
-		ret = f'{self._args.cmd} {shlex.join(self._args.cmd_args)}'
-		if maxlength is not None and (0 < maxlength < len(ret)):
-			ret = ret[0:maxlength] + '...'
-		return ret
+			for i in range(10 * 2):
+				system_pids = psutil.pids()
+				if len(list(filter(lambda x: x.pid in system_pids, children1))) == 0: break
+				time.sleep(0.5)
+			for p in filter(lambda x: x.pid in system_pids, children1):
+				try:
+					log.info(f'try kill child {p.pid} of process {self._process.pid}')
+					p.send_signal(signal.SIGTERM)
+				except Exception as e:
+					log.warning(f'{self.__class__.__name__} number {self._n}: failed to kill child processes ({str(e)})')
+
+			if self._output_file is not None and not self._output_file.closed:
+				log.warning(f'{self.__class__.__name__} number {self._n}: output file is not closed')
+				self._output_file.close()
+
+		except Exception as e:
+			exec_info = sys.exc_info()
+			self._add_fail_msg(f'{e.__class__.__name__}: {str(e)}')
+			log.error(
+				f'unexpected exception in {self.__class__.__name__} '
+				f'number {self._n} pid {self._process.pid} function _wait(): '
+				f'{e.__class__.__name__}: {str(e)}')
+			log.debug(''.join(traceback.format_exception(*exec_info)))
+
+		log.debug(f'{_function_}: finished')
+		self._wait_active = False
+
+	def _add_fail_msg(self, msg):
+		with self._fail_msg_lock:
+			if self._fail_msg == '':
+				self._fail_msg = msg
+			else:
+				self._fail_msg += f'\n{msg}'
+
+	@property
+	def status(self): return self._status
+	@property
+	def status_str(self): return self.STATUS_NAMES[self._status]
+	@property
 	def scheduled(self):  return (self._status == self.ST_SCHEDULED)
+	@property
 	def running(self): return (self._status == self.ST_RUNNING)
+	@property
 	def fail_msg(self): return self._fail_msg
+	@property
 	def exitcode(self): return self._exitcode
-	def n(self): return self._n
-	def describe(self, output_format='text'):
+	@property
+	def command(self):
+		return f'{self._args.cmd} {shlex.join(self._args.cmd_args)}'
+	@property
+	def number(self): return self._n
+	def info(self, output_format='text'):
 		aux = {
 			'number'   : self._n,
-			'command'  : self.get_command(),
-			'status'   : self.get_status(),
+			'command'  : self.command,
+			'status'   : self.status_str,
 			'start'    : self._time_start.strftime('%Y-%m-%d %H:%M:%S') if self._time_start is not None else None,
 			'end'      : self._time_end.strftime('%Y-%m-%d %H:%M:%S') if self._time_end is not None else None,
 			'exitcode' : self._exitcode,
 			'fail_msg' : self._fail_msg,
 		}
+		ret = None
 		if output_format == 'json':
 			ret = json.dumps(aux)
 		elif output_format == 'text':

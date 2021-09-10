@@ -51,12 +51,17 @@ def env_as_bool(envname, not_found=False, default=False, invalid=False):
 
 # =============================================================================
 class FakeLog:
+	debug_active = False
 	@classmethod
 	def debug(cls, msg):
-		pass
+		if (cls.debug_active):
+			sys.stderr.write(f'DEBUG: {msg}\n')
 	@classmethod
 	def info(cls, msg):
-		sys.stdout.write(f'INFO: {msg}\n')
+		sys.stderr.write(f'INFO: {msg}\n')
+	@classmethod
+	def warning(cls, msg):
+		sys.stderr.write(f'WARN: {msg}\n')
 	@classmethod
 	def error(cls, msg):
 		sys.stderr.write(f'ERROR: {msg}\n')
