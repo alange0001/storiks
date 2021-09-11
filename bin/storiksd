@@ -95,6 +95,7 @@ class Program:
 			CommunicationFiles.wipe()
 			self.set_basic_files()
 			self.create_user_groups()
+			self.set_mounts()
 			self.set_etc_profile()
 
 			nbserver = NotebookServer()
@@ -130,15 +131,27 @@ class Program:
 		with open(CommunicationFiles.id, 'wt') as f:
 			f.write(f'{id}\n')
 
+	_container_metadata_cache = None
 	def get_container_metadata(self, name='storiks'):
+		if self._container_metadata_cache is not None:
+			return self._container_metadata_cache
 		_function_ = 'Program.get_container_metadata()'
 		log.debug(_function_)
 		st, out = subprocess.getstatusoutput(f'docker inspect "{name}"')
 		if st == 0:
 			j = json.loads(out)
 			if len(j) > 0:
-				return j[0]
+				self._container_metadata_cache = j[0]
+				return self._container_metadata_cache
 		return None
+
+	def set_mounts(self):
+		metadata = self.get_container_metadata()
+		mounts = metadata.get('Mounts')
+		if mounts is not None:
+			with open('/tmp/storiks.mounts', 'wt') as f:
+				for m in mounts:
+					f.write(f'{m.get("Source")}:{m.get("Destination")}\n')
 
 	def set_etc_profile(self):
 		_function_ = 'Program.set_etc_profile()'
