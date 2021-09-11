@@ -146,7 +146,7 @@ class DBBench : public ExperimentTask {
 			format("docker run --name=\"{}\" -t --rm                  \\\n", container_name) +
 			format("  --ulimit nofile=1048576:1048576                 \\\n") +
 			format("  --user=\"{}\"                                   \\\n", getuid()) +
-			format("  -v \"{}\":/workdata                             \\\n", args->db_path[number]) +
+			format("  -v \"{}\":/workdata                             \\\n", workdata_dir(args->db_path[number])) +
 			format("  -v {}:/tmp/host                                 \\\n", tmpdir->getContainerDir(container_name).c_str())+
 			config +
 			format("  {}                                              \\\n", args->docker_params) +
@@ -442,7 +442,7 @@ class YCSB : public ExperimentTask {
 			format("docker run --name=\"{}\" -t --rm                  \\\n", container_name) +
 			format("  --ulimit nofile=1048576:1048576                 \\\n") +
 			format("  --user=\"{}\"                                   \\\n", getuid()) +
-			format("  -v \"{}\":/workdata                             \\\n", args->ydb_path[number]) +
+			format("  -v \"{}\":/workdata                             \\\n", workdata_dir(args->ydb_path[number])) +
 			format("  -v {}:/tmp/host                                 \\\n", tmpdir->getContainerDir(container_name).c_str());
 		if (args->rocksdb_config_file.length() > 0) { ret +=
 			format("  -v \"{}\":/rocksdb.options                      \\\n", tmpdir->getFileCopy(args->rocksdb_config_file).c_str());
@@ -661,7 +661,7 @@ class AccessTime3 : public ExperimentTask {
 		string ret;
 		ret += format("docker run --name=\"{}\" -t --rm                  \\\n", container_name);
 		ret += format("  --user=\"{}\"                                   \\\n", getuid());
-		ret += format("  -v \"{}\":/workdata                             \\\n", args->at_dir[number]);
+		ret += format("  -v \"{}\":/workdata                             \\\n", workdata_dir(args->at_dir[number]));
 		ret += format("  -v {}:/tmp/host                                 \\\n", tmpdir->getContainerDir(container_name).c_str());
 		ret += format("  {}                                              \\\n", args->docker_params);
 		ret += format("  {}                                              \\\n", args->docker_image);
