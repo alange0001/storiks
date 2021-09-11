@@ -118,9 +118,11 @@ void CommunicationDir::savePID() {
 						std::regex_search(aux, sm, std::regex("^State:\\s+([\\w])\\s+(.*)"));
 						if (sm.size() > 1) {
 							spdlog::info("process with PID = {} has state {} {}", pid, sm.str(1), sm.str(2));
-							if (sm.str(1) != "Z")
+							if (sm.str(1) != "Z") {
 								throw std::runtime_error(format("there is another instance of storiks running with PID={}", pid).c_str());
-
+							} else {
+								break;
+							}
 						}
 					}
 				}
@@ -290,3 +292,29 @@ const char* E2S(int error) {
 	return "unknown";
 #   undef return_error
 }
+
+std::string workdata_dir(const std::string& path) {
+	auto data_dir = getenv("STORIKS_DATA_DIR");  // path used to mount /workdata inside the guests
+	if (data_dir != nullptr) {
+		spdlog::info("STORIKS_DATA_DIR = {}", data_dir);
+		std::filesystem::path data_dir2(data_dir);
+		std::string path2 = path;
+
+		std::smatch sm;
+		std::regex_search(path2, sm, std::regex("^(/+workdata)(/.*|)$"));
+		if (sm.size() > 2) {
+			path2 = path2.substr(sm.str(1).length());
+		}
+		while (path2.find("/") == 0) {
+			path2 = path2.substr(std::strlen("/"));
+		}
+
+		auto ret = data_dir2 / path2;
+		spdlog::info("converting {} to {}", path, ret.c_str());
+		return ret;
+	} else {
+		spdlog::warn("Undefined environment variable STORIKS_DATA_DIR. Using \"{}\".", path);
+		return path;
+	}
+}
+

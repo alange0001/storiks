@@ -285,3 +285,4 @@ public:
 #define __CLASS__ ""
 
 const char* E2S(int error);
+std::string workdata_dir(const std::string& path);
