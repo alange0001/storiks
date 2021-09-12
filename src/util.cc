@@ -293,28 +293,85 @@ const char* E2S(int error) {
 #   undef return_error
 }
 
-std::string workdata_dir(const std::string& path) {
-	auto data_dir = getenv("STORIKS_DATA_DIR");  // path used to mount /workdata inside the guests
-	if (data_dir != nullptr) {
-		spdlog::info("STORIKS_DATA_DIR = {}", data_dir);
-		std::filesystem::path data_dir2(data_dir);
-		std::string path2 = path;
+static std::vector<std::pair<std::string, std::string>> storiks_mounts_cache;
 
-		std::smatch sm;
-		std::regex_search(path2, sm, std::regex("^(/+workdata)(/.*|)$"));
-		if (sm.size() > 2) {
-			path2 = path2.substr(sm.str(1).length());
-		}
-		while (path2.find("/") == 0) {
-			path2 = path2.substr(std::strlen("/"));
-		}
-
-		auto ret = data_dir2 / path2;
-		spdlog::info("converting {} to {}", path, ret.c_str());
+static std::vector<std::pair<std::string, std::string>>& storiks_mounts() {
+	const char* fname = "/tmp/storiks.mounts";
+	auto& ret = storiks_mounts_cache;
+	if (ret.size() > 0)
 		return ret;
+
+	std::ifstream mount_file(fname);
+	if (!mount_file.fail()) {
+		std::string line;
+		while (std::getline(mount_file, line)) {
+			std::smatch sm;
+			std::regex_search(line, sm, std::regex("^([^:]+):(.*)"));
+			if (sm.size() > 2) {
+				spdlog::info("{}: [host]{},  [guest]{}", fname, sm.str(1), sm.str(2));
+				ret.push_back({sm.str(1), sm.str(2)});
+			}
+		}
 	} else {
-		spdlog::warn("Undefined environment variable STORIKS_DATA_DIR. Using \"{}\".", path);
-		return path;
+		spdlog::error("unable to read {}", fname);
 	}
+	return ret;
+}
+
+std::string convert_path_guest2host(const std::string value, bool check_exists) {
+	auto mounts = storiks_mounts();
+
+	std::filesystem::path hostfs("/hostfs");
+	std::filesystem::path value_path(value);
+
+	if (check_exists) {
+		std::filesystem::path aux = value_path;
+		while (aux.has_root_path())
+			aux = aux.string().substr(aux.root_path().string().length());
+		if (!std::filesystem::exists(value_path) && !std::filesystem::exists(hostfs/aux)) {
+			throw std::runtime_error(format("file or directory not found: \"{}\"", value).c_str());
+		}
+	}
+	if (mounts.size() > 0) {
+		value_path = std::filesystem::absolute(value_path);
+		std::pair<std::string, std::string> last_found;
+		for (const auto& i : mounts) {
+			if (value_path.string() == i.second || value_path.string().find(i.second + "/") == 0) {
+				DEBUG_MSG("found value_path {} in {}", value_path.c_str(), i.second);
+				if (i.second.length() > last_found.second.length()) {
+					last_found = i;
+				}
+			}
+		}
+		if (last_found.second.length() > 0) {
+			std::filesystem::path aux(value_path.string().substr(last_found.second.length()));
+			while (aux.has_root_path())
+				aux = aux.string().substr(aux.root_path().string().length());
+			return std::filesystem::path(last_found.first) / aux;
+		} else {
+			spdlog::warn("Failed to convert the guest path \"{}\" to a host path. Considering it as a host path.", value);
+			return value;
+		}
+	} else {
+		spdlog::warn("No guest-host mapping defined. Using the informed path \"{}\".", value);
+	}
+	return value;
+}
+
+std::filesystem::path find_file_guest_hostfs(const std::filesystem::path& value) {
+	if (std::filesystem::is_regular_file(value)) {
+		return std::filesystem::absolute(value);
+	}
+
+	std::filesystem::path hostfs("/hostfs");
+	std::filesystem::path aux(value);
+	while (aux.has_root_path())
+		aux = aux.string().substr(aux.root_path().string().length());
+
+	if (std::filesystem::is_regular_file(hostfs/aux)) {
+		return hostfs/aux;
+	}
+
+	throw std::runtime_error(format("file not found: \"{}\"", value.string()).c_str());
 }
 

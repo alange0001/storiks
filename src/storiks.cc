@@ -141,12 +141,12 @@ class DBBench : public ExperimentTask {
 	string get_docker_cmd() {
 		string config;
 		if (args->rocksdb_config_file.length() > 0)
-			config = fmt::format("  -v \"{}\":/rocksdb.options \\\n", tmpdir->getFileCopy(args->rocksdb_config_file).c_str());
+			config = fmt::format("  -v \"{}\":/rocksdb.options \\\n", tmpdir->getFileCopy(find_file_guest_hostfs(args->rocksdb_config_file)).c_str());
 		string ret =
 			format("docker run --name=\"{}\" -t --rm                  \\\n", container_name) +
 			format("  --ulimit nofile=1048576:1048576                 \\\n") +
 			format("  --user=\"{}\"                                   \\\n", getuid()) +
-			format("  -v \"{}\":/workdata                             \\\n", workdata_dir(args->db_path[number])) +
+			format("  -v \"{}\":/workdata                             \\\n", convert_path_guest2host(args->db_path[number])) +
 			format("  -v {}:/tmp/host                                 \\\n", tmpdir->getContainerDir(container_name).c_str())+
 			config +
 			format("  {}                                              \\\n", args->docker_params) +
@@ -442,10 +442,10 @@ class YCSB : public ExperimentTask {
 			format("docker run --name=\"{}\" -t --rm                  \\\n", container_name) +
 			format("  --ulimit nofile=1048576:1048576                 \\\n") +
 			format("  --user=\"{}\"                                   \\\n", getuid()) +
-			format("  -v \"{}\":/workdata                             \\\n", workdata_dir(args->ydb_path[number])) +
+			format("  -v \"{}\":/workdata                             \\\n", convert_path_guest2host(args->ydb_path[number])) +
 			format("  -v {}:/tmp/host                                 \\\n", tmpdir->getContainerDir(container_name).c_str());
 		if (args->rocksdb_config_file.length() > 0) { ret +=
-			format("  -v \"{}\":/rocksdb.options                      \\\n", tmpdir->getFileCopy(args->rocksdb_config_file).c_str());
+			format("  -v \"{}\":/rocksdb.options                      \\\n", tmpdir->getFileCopy(find_file_guest_hostfs(args->rocksdb_config_file)).c_str());
 		}
 		ret += get_jni_param();
 		ret += workload_docker;
@@ -469,19 +469,14 @@ class YCSB : public ExperimentTask {
 	string get_jni_param() {
 		string ret;
 		if (args->ydb_rocksdb_jni != "") {
-			std::filesystem::path p = args->ydb_rocksdb_jni;
-			std::error_code ec;
-			if (! std::filesystem::is_regular_file(p, ec) ) {
-				throw runtime_error(format("parameter ydb_rocksdb_jni=\"{}\" is not a regular file: {}", args->ydb_rocksdb_jni, ec.message()).c_str());
-			}
-			ret += format("  -v {}:/opt/YCSB/rocksdb/target/dependency/rocksdbjni-linux64.jar:ro \\\n", std::filesystem::absolute(p).string());
+			ret += format("  -v \"{}\":/opt/YCSB/rocksdb/target/dependency/rocksdbjni-linux64.jar:ro \\\n", convert_path_guest2host(args->ydb_rocksdb_jni));
 		}
 		return ret;
 	}
 
 	void set_workload_params() {
 		if (std::filesystem::is_regular_file(args->ydb_workload[number])) {
-			workload_docker = format("  -v {}:/ycsb_workloadfile                        \\\n", args->ydb_workload[number]);
+			workload_docker = format("  -v \"{}\":/ycsb_workloadfile                        \\\n", convert_path_guest2host(args->ydb_workload[number]));
 			workload_ycsb   = "/ycsb_workloadfile";
 		} else {
 			workload_ycsb   = format("/opt/YCSB/workloads/{}", args->ydb_workload[number]);
@@ -661,7 +656,7 @@ class AccessTime3 : public ExperimentTask {
 		string ret;
 		ret += format("docker run --name=\"{}\" -t --rm                  \\\n", container_name);
 		ret += format("  --user=\"{}\"                                   \\\n", getuid());
-		ret += format("  -v \"{}\":/workdata                             \\\n", workdata_dir(args->at_dir[number]));
+		ret += format("  -v \"{}\":/workdata                             \\\n", convert_path_guest2host(args->at_dir[number]));
 		ret += format("  -v {}:/tmp/host                                 \\\n", tmpdir->getContainerDir(container_name).c_str());
 		ret += format("  {}                                              \\\n", args->docker_params);
 		ret += format("  {}                                              \\\n", args->docker_image);

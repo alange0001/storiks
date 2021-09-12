@@ -285,4 +285,5 @@ public:
 #define __CLASS__ ""
 
 const char* E2S(int error);
-std::string workdata_dir(const std::string& path);
+std::string convert_path_guest2host(const std::string value, bool check_exists=true);
+std::filesystem::path find_file_guest_hostfs(const std::filesystem::path& value);
