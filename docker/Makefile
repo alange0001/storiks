@@ -20,6 +20,7 @@ docker:
 	@docker build -t "$(DOCKER_IMAGE)" --compress .
 
 opt:
+	@mkdir opt || true
 	@+make storiks
 	@+make rocksdb
 	@+make ycsb
