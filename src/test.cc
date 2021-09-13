@@ -12,19 +12,31 @@
 #include <chrono>
 #include <regex>
 #include <any>
+#include <filesystem>
+#include <fstream>
 
 #include "util.h"
+//#include "args.h"
 
 ////////////////////////////////////////////////////////////////////////////////////
 #undef __CLASS__
 #define __CLASS__ ""
+
+struct FakeArgs {
+	uint32_t duration = 60;
+	uint32_t warm_period = 10;
+	uint32_t num_at = 1;
+	std::string at_io_engine = "";
+};
+
+std::unique_ptr<FakeArgs> args;
+//std::unique_ptr<Args> args;
 
 void signalHandler(int signal) {
 	spdlog::warn("received signal {}", signal);
 	std::signal(signal, SIG_DFL);
 	std::raise(signal);
 }
-
 
 int main(int argc, char** argv) {
 	std::signal(SIGTERM, signalHandler);
@@ -46,6 +58,9 @@ int main(int argc, char** argv) {
 		for (int i = 1; i < argc; i++) {
 			cmd_list.push_back(argv[i]);
 		}
+
+		args.reset(new FakeArgs());
+		// args.reset(new Args(argc, argv));
 
 
 	} catch (const std::exception& e) {
