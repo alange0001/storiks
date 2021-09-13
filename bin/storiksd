@@ -470,7 +470,7 @@ class ScheduledCommand:
 		self._fail_msg_lock = threading.Lock()
 
 		try:
-			if self._status == self.ST_CANCELED:
+			if self._status == self.ST_CANCELED or self._cancel_flag:
 				log.info(f'{self.__class__.__name__} number {self._n} was canceled')
 				return
 
@@ -565,6 +565,8 @@ class ScheduledCommand:
 	def cancel_flag(self, val=None):
 		if val is not None:
 			self._cancel_flag = val
+			if val and self._status == self.ST_SCHEDULED:
+				self._status = self.ST_CANCELED
 		return self._cancel_flag
 
 	def _wait(self):
