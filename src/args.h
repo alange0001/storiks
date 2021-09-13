@@ -29,7 +29,7 @@ using std::function;
 	_f(duration, uint32_t, DEFINE_uint32,                         \
 		60,                                                       \
 		"Duration of the experiment (minutes) including warm_period", \
-		value >= 1,                                               \
+		value >= 0,                                               \
 		nullptr)                                                  \
 	_f(warm_period, uint32_t, DEFINE_uint32,                      \
 		0,                                                        \
@@ -90,6 +90,26 @@ using std::function;
 		0,                                                        \
 		"Number of access_time3 instances",                       \
 		true,                                                     \
+		nullptr)                                                  \
+	_f(at_script_gen, string, DEFINE_string,                      \
+		"",                                                       \
+		"Generate --at_script automatically (mutually exclusive). Values: read_to_write, read_to_write2, active_instances, and iodepth.", \
+		((std::set<std::string>{"", "read_to_write", "read_to_write2", "active_instances", "iodepth"}).count(value) > 0), \
+		nullptr)                                                  \
+	_f(at_script_gen_w0_interval, uint32_t, DEFINE_uint32,        \
+		10,                                                       \
+		"Time (min) after warm_period without concurrent workloads.", \
+		value > 0,                                                \
+		nullptr)                                                  \
+	_f(at_script_gen_interval, uint32_t, DEFINE_uint32,           \
+		2,                                                        \
+		"Time (min) between concurrent workloads.",               \
+		value > 0,                                                \
+		nullptr)                                                  \
+	_f(at_script_gen_max_iodepth, uint32_t, DEFINE_uint32,        \
+		32,                                                       \
+		"Max iodepth used in --at_script_gen=iodepth.",           \
+		value > 0,                                                \
 		nullptr)                                                  \
 	_f(docker_image, string, DEFINE_string,                       \
 		getenv_default("STORIKS_DOCKER_IMAGE", DOCKER_IMAGE),     \
@@ -345,6 +365,7 @@ struct Args {
 
 private:
 	void checkUniqueStr(const char* name, const vector<string>& src);
+	void checkAtScriptGen();
 };
 
 ////////////////////////////////////////////////////////////////////////////////////
