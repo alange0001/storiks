@@ -42,7 +42,7 @@ class Options:
 	file_description = None  # str or callable f(obj : File) -> str
 	save = False
 	savePlotData = False
-	graphTickMajor = 5
+	graphTickMajor = 'auto'
 	graphTickMinor = 5
 	args_global = {'title': 'default+filename'}
 	after_pd_data = None
@@ -56,9 +56,8 @@ class Options:
 	plot_cpu = True
 	plot_at3 = True
 	plot_at3_script = True
-	plot_io_norm = False
 	plot_at3_write_ratio = False
-	plot_pressure = False
+	plot_pressure = True
 	args_pressure = dict()
 	plot_containers_io = True
 	plot_ycsb_lsm_stats = True
@@ -66,9 +65,9 @@ class Options:
 	plot_ycsb_lsm_details = True
 	plot_ycsb_lsm_summary = True
 	plot_smart_utilization = True
-	plot_pairgrid = False
+	plot_pairgrid = True
 	args_pairgrid = dict()
-	plot_pairgrid_kv = False
+	plot_pairgrid_kv = True
 	args_pairgrid_kv = dict()
 	use_at3_counters = True
 	at3_ticks = True
@@ -93,6 +92,7 @@ class Options:
 			'db_mean_interval': 'use args_db["mean_interval"] instead',
 			'pressure_decreased': 'use args_pressure["mark_decreased"] instead',
 			'print_pressure_values': 'use args_pressure["print_values"] instead',
+			'plot_io_norm': 'deprecated parameter',
 		}
 		for k, v in args.items():
 			if k == 'plot_nothing':
@@ -239,7 +239,8 @@ class AllFiles:
 
 	def graph_dbmean(self):
 		pressures = self.file_pressures
-		if len(pressures) == 0: return
+		if len(list(filter(lambda x: x is not None, pressures))) == 0:
+			return
 
 		fig, ax = plt.subplots()
 		fig.set_figheight(3)
@@ -247,7 +248,9 @@ class AllFiles:
 
 		for i in range(len(self._file_objs)):
 			f = self._file_objs[i]
-			fp = self.file_pressures[i]
+			fp = pressures[i]
+			if fp is None:
+				continue
 
 			sns.lineplot(ax=ax, x='w_name', y='ycsb[0].ops_per_s', data=f.pd_data,
 			             label=fp['file_label'] if fp is not None else 'None')
@@ -275,15 +278,13 @@ class AllFiles:
 
 		ret = []
 		for f in self._file_objs:
-			pdata = f.pressure_data
-			if pdata is not None:
-				ret.append(f.pressure_data)
+			ret.append(f.pressure_data)
 		self._file_pressures = ret
 		return self._file_pressures
 
 	def graph_pressure(self) -> None:
 		pressures = self.file_pressures
-		if len(pressures) == 0:
+		if len(list(filter(lambda x: x is not None, pressures))) == 0:
 			return
 
 		colors = plt.get_cmap('tab10').colors
@@ -296,9 +297,7 @@ class AllFiles:
 		Y_labels = []
 		Y_ticks = []
 		i_ax = 0
-		for data in pressures:
-			if data is None: continue
-
+		for data in filter(lambda x: x is not None, pressures):
 			line_label = data['file_label']
 			X = data['W_normalized']
 			X_labels = data['W_names']
@@ -1149,7 +1148,17 @@ class File:
 
 		args = self.overlap_args(kargs)
 
-		X = [x['time']/60.0 for x in self._data['performancemonitor']]
+		df = self.pd_data_exp('performancemonitor')
+		df_keys = df.keys()
+		for k in [
+			'time', 'disk.diskstats.rkB/s', 'disk.diskstats.wkB/s',
+			'disk.diskstats.r/s', 'disk.diskstats.w/s'
+		]:
+			if k not in df_keys:
+				print(f'graph_io ERROR: key {k} is missing')
+				return
+
+		X = df['time']/60.
 
 		fig, axs = plt.subplots(3, 1)
 		fig.set_figheight(5)
@@ -1158,45 +1167,43 @@ class File:
 		for ax_i in range(0,3):
 			ax = axs[ax_i]
 			if ax_i == 0:
-				Yr, Yw = None, None
-				try: # due to a iostat bug when exporting kB/s in the JSON format. Using /proc/diskstats:
-					Yr = numpy.array([i['disk']['diskstats']['rkB/s']/1024  for i in self._data['performancemonitor']])
-					Yw = numpy.array([i['disk']['diskstats']['wkB/s']/1024  for i in self._data['performancemonitor']])
-					# print('using /proc/diskstats')
-				except: pass
-				if Yr is None or Yw is None:
-					Yr = numpy.array([i['disk']['iostat']['rkB/s']/1024  for i in self._data['performancemonitor']])
-					Yw = numpy.array([i['disk']['iostat']['wkB/s']/1024  for i in self._data['performancemonitor']])
+				Yr = df['disk.diskstats.rkB/s']/1024.0
+				Yw = df['disk.diskstats.wkB/s']/1024.0
 				Yt = Yr + Yw
 				ax.plot(X, Yr, '-', lw=1, label='read', color='green')
 				ax.plot(X, Yw, '-', lw=1, label='write', color='orange')
 				ax.plot(X, Yt, '-', lw=1, label='total', color='blue')
-				ax.set(title="iostat", ylabel="MB/s")
+				ax.set(ylabel="MiB/s")
 				ax.legend(loc='upper right', ncol=3, frameon=True)
 			elif ax_i == 1:
-				Y = [i['disk']['iostat']['r/s']     for i in self._data['performancemonitor']]
-				ax.plot(X, Y, '-', lw=1, label='read', color='green')
-				Y = [i['disk']['iostat']['w/s']     for i in self._data['performancemonitor']]
-				ax.plot(X, Y, '-', lw=1, label='write', color='orange')
-				ax.set(ylabel="IO/s")
-				ax.legend(loc='upper right', ncol=2, frameon=True)
+				Yr = df['disk.diskstats.r/s']
+				Yw = df['disk.diskstats.w/s']
+				Yt = Yr + Yw
+				ax.plot(X, Yr, '-', lw=1, label='read', color='green')
+				ax.plot(X, Yw, '-', lw=1, label='write', color='orange')
+				ax.plot(X, Yt, '-', lw=1, label='total', color='blue')
+				ax.set(ylabel="IOPS")
+				ax.legend(loc='upper right', ncol=3, frameon=True)
 			elif ax_i == 2:
-				Y = [i['disk']['iostat']['util']     for i in self._data['performancemonitor']]
-				ax.plot(X, Y, '-', lw=1, label='%util')
-				ax.set(xlabel="time (min)", ylabel="percent")
-				ax.set_ylim([-5, 105])
-				ax.legend(loc='upper right', ncol=1, frameon=True)
+				Yr = df['disk.diskstats.read_time_ms']
+				Yw = df['disk.diskstats.write_time_ms']
+				ax.plot(X, Yr, '-', lw=1, label='read', color='green')
+				ax.plot(X, Yw, '-', lw=1, label='write', color='orange')
+				ax.set(xlabel="time (min)", ylabel="time spent\n(ms)")
+				# ax.set_ylim([-5, 105])
+				ax.legend(loc='upper right', ncol=2, frameon=True)
 
 			#chartBox = ax.get_position()
 			#ax.set_position([chartBox.x0, chartBox.y0, chartBox.width*0.65, chartBox.height])
 			#ax.legend(loc='upper center', bbox_to_anchor=(1.35, 0.9), title='threads', ncol=1, frameon=True)
 
-			aux = (X[-1] - X[0]) * 0.01
-			ax.set_xlim([X[0]-aux,X[-1]+aux])
+			aux = (X.max() - X.min()) * 0.01
+			ax.set_xlim([X.min()-aux, X.max()+aux])
 			if ax_i == 0:
-				self.add_upper_ticks(ax, int(X[0]), int(X[-1]), args)
+				self.add_upper_ticks(ax, int(X.min()), int(X.max()), args)
 
 			self.set_x_ticks(ax)
+			axs[0].set(title=self.get_graph_title(args, "I/O stats"))
 
 		fig.tight_layout()
 
@@ -1256,6 +1263,7 @@ class File:
 				fig.savefig(save_name, bbox_inches="tight")
 		plt.show()
 
+	# DEPRECATED
 	def graph_io_norm(self):
 		if self._data.get('iostat') is None:
 			return
@@ -1354,7 +1362,7 @@ class File:
 
 		axs[0].set_ylim([-5, None])
 		axs[1].set_ylim([-5, 105])
-		axs[0].set(title="CPU", ylabel="all CPUs\npercent")
+		axs[0].set(title=self.get_graph_title(args, "CPU"), ylabel="all CPUs\npercent")
 		axs[1].set(xlabel="time (min)", ylabel="per CPU\npercent")
 
 		axs[0].legend(loc='upper right', ncol=2, frameon=True)
@@ -1440,7 +1448,7 @@ class File:
 			ax_set['ylabel'] = f"at3[{i}]\nMB/s"
 
 			if i == 0:
-				ax_set['title'] = "access_time3 (at3): performance"
+				ax_set['title'] = self.get_graph_title(args, "access_time3 (at3): performance")
 			if i == self._num_at -1:
 				ax_set['xlabel'] = "time (min)"
 				ax.legend(bbox_to_anchor=(0., -.8, 1., .102), loc='lower left',
@@ -1493,11 +1501,13 @@ class File:
 			Y = [j['random_ratio'] if j['wait'] == 'false' else None for j in cur_at]
 			ax.plot(X, Y, '-.', lw=1.5, label='random_ratio (rr)', color='blue')
 
+			# TODO add iodepth
+
 			ax_set = dict()
 
 			ax_set['ylabel'] = f'at3[{i}]\nratio'
 			if i == 0:
-				ax_set['title'] = 'Concurrent Workloads'
+				ax_set['title'] = self.get_graph_title(args, 'Concurrent Workloads')
 			if i == self._num_at -1:
 				ax_set['xlabel'] = "time (min)"
 				ax.legend(bbox_to_anchor=(0., -.8, 1., .102), loc='lower left',
@@ -1645,11 +1655,9 @@ class File:
 	def graph_pressure(self, **kargs):
 		data = self.pressure_data
 		if data is None: return
-		pd2 = data['pd2']
+		# pd2 = data['pd2']
 
-		args = copy.copy(self._options.args_pressure)
-		for k, v in kargs.items():
-			args[k] = v
+		args = self.overlap_args(self._options.args_pressure, kargs)
 
 		fig = plt.figure()
 		fig.set_figheight(2.8)
@@ -1693,6 +1701,8 @@ class File:
 		ax.set_ylim([0, 1.1*w0])
 		ax2.set_ylim([min(0, min(Y2)), 1.1])
 
+		ax.set(title=self.get_graph_title(args, "Pressure Scale"))
+
 		######################################################
 		ax = fig.add_axes([0, 0.62, 1, 0.16])
 
@@ -1734,6 +1744,8 @@ class File:
 			for k in containers_data.keys():
 				if k not in container_names:
 					container_names.append(k)
+		if 'storiks' in container_names:
+			del container_names[container_names.index('storiks')]
 		return container_names
 
 	def map_container_names(self):
@@ -1822,7 +1834,7 @@ class File:
 			ax.set_xlim([X[0]-aux,X[-1]+aux])
 			self.set_x_ticks(ax)
 
-		axs[0].set(title="Containers I/O")
+		axs[0].set(title=self.get_graph_title(args, "Containers I/O"))
 		axs[-1].set(xlabel="time (min)")
 
 		self.add_upper_ticks(axs[0], int(X[0]), int(X[-1]), args)
@@ -2124,7 +2136,7 @@ class File:
 		Y = [100. * float(coalesce(get_recursive(y, 'smart', 'utilization'), 0)) / capacity for y in perfmon_data]
 		ax.plot(X, Y, '-', lw=2)
 
-		ax.set(title="Flash Pages Utilization")
+		ax.set(title=self.get_graph_title(args, "Flash Pages Utilization"))
 		ax.set(xlabel="time (min)")
 		ax.set(ylabel=f"percent")
 		#ax.legend(loc='upper right', ncol=2, frameon=False)
@@ -2158,13 +2170,13 @@ class File:
 
 		cols = {
 			**first_metrics,
-			"performancemonitor.disk.iostat.r/s": "disk:r/s", #IOPS
-			"performancemonitor.disk.iostat.w/s": "disk:w/s",
-			"performancemonitor.disk.iostat.rareq-sz": "disk:r_size", #block size
-			"performancemonitor.disk.iostat.wareq-sz": "disk:w_size",
-			"performancemonitor.disk.iostat.aqu-sz": "disk:queue", #iodepth
-			"performancemonitor.disk.iostat.r_await": "disk:r_await",
-			"performancemonitor.disk.iostat.w_await": "disk:w_await",
+			"performancemonitor.disk.diskstats.r/s": "disk:r/s", #IOPS
+			"performancemonitor.disk.diskstats.w/s": "disk:w/s",
+			"performancemonitor.disk.diskstats.rkB/s": "disk:rkB/s", #block size
+			"performancemonitor.disk.diskstats.wkB/s": "disk:wkB/s",
+			"performancemonitor.disk.diskstats.cur_ios": "disk:cur_ios", #iodepth
+			"performancemonitor.disk.diskstats.read_time_ms": "disk:r_spent",
+			"performancemonitor.disk.diskstats.write_time_ms": "disk:w_spent",
 		}
 
 		df = self.pd_data
@@ -2260,13 +2272,13 @@ class File:
 				'comp. f.': 'ycsb[0].socket_report.rocksdb.cfstats.compaction.Sum.CompactedFiles',
 				'kv:r/s': 'performancemonitor.containers.ycsb_0.blkio.serviced/s.Read',
 				'kv:w/s': 'performancemonitor.containers.ycsb_0.blkio.serviced/s.Write',
-				"disk:r/s": "performancemonitor.disk.iostat.r/s",  # IOPS
-				"disk:w/s": "performancemonitor.disk.iostat.w/s",
-				"disk:r_size": "performancemonitor.disk.iostat.rareq-sz",  # block size
-				"disk:w_size": "performancemonitor.disk.iostat.wareq-sz",
-				"disk:queue": "performancemonitor.disk.iostat.aqu-sz",  # iodepth
-				"disk:r_await": "performancemonitor.disk.iostat.r_await",
-				"disk:w_await": "performancemonitor.disk.iostat.w_await",
+				"disk:r/s": "performancemonitor.disk.diskstats.r/s",  # IOPS
+				"disk:w/s": "performancemonitor.disk.diskstats.w/s",
+				"disk:rkB/s": "performancemonitor.disk.diskstats.rkB/s",  # block size
+				"disk:wkB/s": "performancemonitor.disk.diskstats.wkB/s",
+				"disk:cur_ios": "performancemonitor.disk.diskstats.cur_ios",  # iodepth
+				"disk:r_spent": "performancemonitor.disk.diskstats.read_time_ms",
+				"disk:w_spent": "performancemonitor.disk.diskstats.write_time_ms",
 			}
 			for v in cols.values():
 				self.check_and_get_column(v)
@@ -2311,10 +2323,23 @@ class File:
 				sys.stderr.write('Exception:\n' +
 								 ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback)) + '\n')
 
+	_x_tick_major = None
+	_x_tick_minor = None
 	def set_x_ticks(self, ax):
-		if self._options.graphTickMajor is not None:
-			ax.xaxis.set_major_locator(MultipleLocator(self._options.graphTickMajor))
-			ax.xaxis.set_minor_locator(AutoMinorLocator(self._options.graphTickMinor))
+		# print(f'DEBUG: File.set_x_ticks() major={self._x_tick_major}, minor={self._x_tick_minor}')
+		if self._x_tick_major is None:
+			self._x_tick_major = self._options.graphTickMajor
+			self._x_tick_minor = self._options.graphTickMinor
+		if self._x_tick_major == 'auto':
+			xmax = self.pd_data['time_min'].max()
+			i = 1
+			while i < round(xmax / 20):
+				i = 2 if i == 1 else 5 if i == 2 else i + 5
+			self._x_tick_major = i
+			self._x_tick_minor = 5
+		if self._x_tick_major is not None:
+			ax.xaxis.set_major_locator(MultipleLocator(self._x_tick_major))
+			ax.xaxis.set_minor_locator(AutoMinorLocator(self._x_tick_minor))
 			ax.grid(which='major', color='#CCCCCC', linestyle='--')
 			ax.grid(which='minor', color='#CCCCCC', linestyle=':')
 
@@ -2375,7 +2400,7 @@ class File:
 
 		## Special case graphs:
 		# exp_at3_rww:
-		if self._options.plot_io_norm: self.graph_io_norm()
+		# if self._options.plot_io_norm: self.graph_io_norm()
 		# exp_at3:
 		if self._options.plot_at3_write_ratio: self.graph_at3_write_ratio()
 
