@@ -108,7 +108,12 @@ using std::function;
 		nullptr)                                                  \
 	_f(at_script_gen_max_iodepth, uint32_t, DEFINE_uint32,        \
 		32,                                                       \
-		"Max iodepth used in --at_script_gen=iodepth.",           \
+		"Max iodepth used by --at_script_gen=iodepth.",           \
+		value > 0,                                                \
+		nullptr)                                                  \
+	_f(at_script_gen_iodepth_step, uint32_t, DEFINE_uint32,       \
+		2,                                                        \
+		"iodepth increment step used by --at_script_gen=iodepth.", \
 		value > 0,                                                \
 		nullptr)                                                  \
 	_f(docker_image, string, DEFINE_string,                       \
