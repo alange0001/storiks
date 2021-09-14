@@ -529,7 +529,7 @@ class File:
 				self._at3_changes.append(i_at)
 				last_conf = None
 				for j_at in self._data.get(f'access_time3[{i}]'):
-					j_at_v = (j_at['wait'], j_at['random_ratio'], j_at['write_ratio'])
+					j_at_v = (j_at['wait'], j_at['random_ratio'], j_at['write_ratio'], j_at['iodepth'])
 					if j_at_v != last_conf:
 						last_conf = j_at_v
 						i_at[j_at['time']] = j_at_v
