@@ -36,6 +36,14 @@ sns.set_style('white')
 
 
 class Options:
+	"""Define the behaviour of File and AllFiles objects.
+
+	Example:
+		You can change any of its default options by initialization:
+		    opt1 = Options(save=True, formats=['pdf'])
+		or by copy:
+		    opt2 = opt1(save=False)
+	"""
 	trace_exceptions = False
 	formats = ['png', 'pdf']
 	print_params = False
@@ -145,6 +153,15 @@ DB = DBClass()
 
 
 class AllFiles:
+	"""Aggregates one or more File objects.
+
+	Example:
+		af = AllFiles('allfiles1', Options(), getFiles('.', str_filter='workloada'))
+		     'allfiles1'  - file prefix used to save aggregated experiment graphs
+		     Options()    - instance of class Options
+		     getFiles...  - list of experiment files (.out or .out.xz) in directory '.' with 'workloada'
+		                    in their respective names
+	"""
 	_options = None
 	_filename = None
 	_file_list = None
@@ -177,7 +194,7 @@ class AllFiles:
 	def file_names(self):
 		return self._file_list
 
-	def check_options(self, options):
+	def check_options(self, options: Options):
 		if self._options is None:
 			self._options = options
 
@@ -325,6 +342,22 @@ class AllFiles:
 
 
 class File:
+	"""Interpret and plot graphs from an experiment file (.out or .out.xz).
+
+	Main data frames:
+		pd_data
+		pd_data_exp(name)
+
+	Main graphs:
+		graph_db()
+		graph_pressure()
+		graph_io()
+		graph_cpu()
+
+	Auxiliary files:
+		{experiment file without extension}.label - create a text file containing a label for this experiment which
+		                                            will be used by the graphs of AllFiles
+	"""
 	_filename    = None
 	@property
 	def filename(self): return self._filename
@@ -346,7 +379,7 @@ class File:
 	_num_ydbs     = None
 	_at_direct_io = None
 
-	def __init__(self, filename, options, allfiles=None):
+	def __init__(self, filename: str, options: Options, allfiles: AllFiles = None):
 		self._filename = filename
 		self._options = options
 		self._allfiles = allfiles
@@ -2636,6 +2669,14 @@ def keep_updating(*args, **kwargs):
 
 
 def getFiles(dirname: str, str_filter: str = None, list_filter: list = None, lambda_filter=None) -> list:
+	"""Return a list of experiment files
+
+	:param dirname: directory path
+	:param str_filter: string used to filter the file names (optional)
+	:param list_filter: list of strings used to filter the file names (optional)
+	:param lambda_filter: function used to filter the file names (optional)
+	:return: list of experiment files
+	"""
 	if not os.path.isdir(dirname):
 		print(f'WARNING: "{dirname}" is not a directory')
 		return []
