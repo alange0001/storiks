@@ -122,6 +122,9 @@ Args::Args(int argc, char** argv) : ALL_ARGS_List_F(initializeList) log_level("i
 #	undef print_arg_list
 
 	checkAtScriptGen();
+
+	if (test_args) // --test_args
+		exit(0);
 }
 
 void Args::checkUniqueStr(const char* name, const vector<string>& src) {
@@ -222,7 +225,7 @@ static std::pair<std::string, uint32_t> pressure_scale(Args* args) {
 			ret.push_back(format("0:wait;0:iodepth=1;{}m:wait=false", jc));
 		}
 		jc += interval;
-		for (uint32_t d=2; d <= args->at_script_gen_max_iodepth; d+=args->at_script_gen_iodepth_step) {
+		for (uint32_t d=2; d <= args->at_script_gen_iodepth_max; d+=args->at_script_gen_iodepth_step) {
 			for (uint32_t i=0; i < args->num_at; i++) {
 				ret[i] += format(";{}m:iodepth={}", jc, d);
 			}

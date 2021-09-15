@@ -26,6 +26,11 @@ using std::function;
 		"Log level (output,debug,info)",                          \
 		true,                                                     \
 		setLogLevel(value))                                       \
+	_f(test_args, bool, DEFINE_bool,                              \
+		false,                                                    \
+		"test the parameters passed to the program and exit",     \
+		true,                                                     \
+		nullptr)                                                  \
 	_f(duration, uint32_t, DEFINE_uint32,                         \
 		60,                                                       \
 		"Duration of the experiment (minutes) including warm_period", \
@@ -99,14 +104,14 @@ using std::function;
 	_f(at_script_gen_w0_interval, uint32_t, DEFINE_uint32,        \
 		10,                                                       \
 		"Time (min) after warm_period without concurrent workloads.", \
-		value > 0,                                                \
+		value >= 0,                                               \
 		nullptr)                                                  \
 	_f(at_script_gen_interval, uint32_t, DEFINE_uint32,           \
 		2,                                                        \
 		"Time (min) between concurrent workloads.",               \
 		value > 0,                                                \
 		nullptr)                                                  \
-	_f(at_script_gen_max_iodepth, uint32_t, DEFINE_uint32,        \
+	_f(at_script_gen_iodepth_max, uint32_t, DEFINE_uint32,        \
 		32,                                                       \
 		"Max iodepth used by --at_script_gen=iodepth.",           \
 		value > 0,                                                \
