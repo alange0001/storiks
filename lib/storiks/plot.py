@@ -75,8 +75,7 @@ class Options:
 	plot_all_ecdf = True
 	plot_all_dbmean = True
 	plot_all_pressure = True
-	all_pressure_label = None  # callable f(obj : File) -> str
-	file_label = None  # callable f(obj : File) -> str
+	file_label = None
 
 	def __init__(self, **kargs):
 		self._process_args(kargs)
@@ -92,7 +91,8 @@ class Options:
 			'db_mean_interval': 'use args_db["mean_interval"] instead',
 			'pressure_decreased': 'use args_pressure["mark_decreased"] instead',
 			'print_pressure_values': 'use args_pressure["print_values"] instead',
-			'plot_io_norm': 'deprecated parameter',
+			'plot_io_norm': 'parameter is no longer supported',
+			'all_pressure_label': 'use file_label',
 		}
 		for k, v in args.items():
 			if k == 'plot_nothing':
@@ -190,12 +190,7 @@ class AllFiles:
 		df_list = []
 		for f in self._file_objs:
 			df = f.pd_data
-			if callable(self._options.file_label):
-				df['af_name'] = self._options.file_label(f)
-			elif isinstance(self._options.file_label, list):
-				df['af_name'] = f.get_file_label(*self._options.file_label)
-			else:
-				df['af_name'] = f.filename
+			df['af_name'] = f.file_label
 			df_list.append(df)
 
 		if len(df_list) > 0:
@@ -819,58 +814,80 @@ class File:
 		return args.get('title') if isinstance(args.get('title'), str) else '(unknown type)'
 
 	def get_file_label(self, *label_items):
-		ret = []
-		for i in label_items:
-			if i == 'workload' and self._params['num_ydbs'] > 0:
-				ret.append('YCSB:' + self._params['ydb_workload[0]'][-1].upper())
-			elif i == 'device':
-				aux = get_recursive(self._data, 'performancemonitor', 0, 'smart', 'model')
-				if aux is not None:
-					aux = aux.replace('Samsung SSD ', 'S')
-					aux = aux.replace(' PRO ', 'P')
-					aux = aux.replace(' EVO ', 'E')
-					aux = aux.replace('Plus ', '+')
-					aux = aux.replace('GB', '')
-					ret.append(aux)
-			elif i == 'device_auto':
-				r = re.findall(r'/auto/([^/]+)', self._params['ydb_path[0]'])
-				if len(r) > 0:
-					ret.append(f'{r[0]}')
-			elif i == 'kernel':
-				sinfo = get_recursive(self._data, 'performancemonitor', 0, 'system_info')
-				if isinstance(sinfo, str):
-					r = re.findall(r'([0-9]+\.[0-9]+)', sinfo)
-					if len(r) > 0: ret.append(f'K{r[0]}')
-				elif isinstance(sinfo, dict):
-					r = re.findall(r'([0-9]+\.[0-9]+)', sinfo['kernel-release'])
-					if len(r) > 0: ret.append(f'K{r[0]}')
-			elif i == 'stats_interval':
-				aux = self._params.get('stats_interval')
-				if aux is not None:
-					ret.append(f'si{aux}')
-			elif i.find('re:') == 0:
-				r = re.findall(i[3:], self.filename)
-				while isinstance(r, list) or isinstance(r, set): r = r[0]
-				ret.append(str(r))
-			elif i.find('param:') == 0:
-				aux = i.split(':')
-				key = aux[1]
-				name = aux[2] if len(aux) >= 3 else ''
-				if self._params.get(key) is not None:
-					ret.append(f'{name}{self._params[key]}')
-				else:
-					print(f'WARN: parameter named "{key}" not found')
-			else:
-				print(f'ERROR: invalid label item "{i}"')
-		if len(ret) == 0:
-			return self._filename_without_ext
-		return ','.join(ret)
+		pass
 
-	@classmethod
-	def file_label_f(cls, *label_items):
-		if len(label_items) == 0:
-			label_items = ['workload', 'device', 'kernel', 'stats_interval']
-		return lambda self: self.get_file_label(*label_items)
+	_file_label = None
+	@property
+	def file_label(self):
+		if self._file_label is not None:
+			return self._file_label
+
+		if callable(self._options.file_label):
+			self._file_label = self._options.file_label(self)
+			return self._file_label
+
+		if isinstance(self._options.file_label, list):
+			ret = []
+			for i in self._options.file_label:
+				if i == 'workload' and self._params['num_ydbs'] > 0:
+					ret.append('YCSB:' + self._params['ydb_workload[0]'][-1].upper())
+				elif i == 'device':
+					aux = get_recursive(self._data, 'performancemonitor', 0, 'smart', 'model')
+					if aux is not None:
+						aux = aux.replace('Samsung SSD ', 'S')
+						aux = aux.replace(' PRO ', 'P')
+						aux = aux.replace(' EVO ', 'E')
+						aux = aux.replace('Plus ', '+')
+						aux = aux.replace('GB', '')
+						ret.append(aux)
+				elif i == 'device_auto':
+					r = re.findall(r'/auto/([^/]+)', self._params['ydb_path[0]'])
+					if len(r) > 0:
+						ret.append(f'{r[0]}')
+				elif i == 'kernel':
+					sinfo = get_recursive(self._data, 'performancemonitor', 0, 'system_info')
+					if isinstance(sinfo, str):
+						r = re.findall(r'([0-9]+\.[0-9]+)', sinfo)
+						if len(r) > 0: ret.append(f'K{r[0]}')
+					elif isinstance(sinfo, dict):
+						r = re.findall(r'([0-9]+\.[0-9]+)', sinfo['kernel-release'])
+						if len(r) > 0: ret.append(f'K{r[0]}')
+				elif i == 'stats_interval':
+					aux = self._params.get('stats_interval')
+					if aux is not None:
+						ret.append(f'si{aux}')
+				elif i.find('re:') == 0:
+					r = re.findall(i[3:], self.filename)
+					while isinstance(r, list) or isinstance(r, set): r = r[0]
+					ret.append(str(r))
+				elif i.find('param:') == 0:
+					aux = i.split(':')
+					key = aux[1]
+					name = aux[2] if len(aux) >= 3 else ''
+					if self._params.get(key) is not None:
+						ret.append(f'{name}{self._params[key]}')
+					else:
+						print(f'WARN: parameter named "{key}" not found')
+				else:
+					print(f'ERROR: invalid label item "{i}"')
+			if len(ret) == 0:
+				self._file_label = self._filename_without_ext
+				return self._file_label
+			self._file_label = ','.join(ret)
+			return self._file_label
+
+		try:
+			file = f'{self._filename_without_ext}.label'
+			if os.path.isfile(file):
+				with open(file, 'rt') as f:
+					aux = f.readline().strip()
+					self._file_label = aux
+					return aux
+		except Exception as e:
+			print(f'ERROR: file_label exception: {str(e)}')
+
+		self._file_label = self._filename_without_ext
+		return self._file_label
 
 	def graph_db(self, **kargs):
 		num_dbbench, num_ycsb = self.count_dbs()
@@ -1640,13 +1657,7 @@ class File:
 				ret['time'].append(t)
 				ret['time_min'].append(t/60.0)
 
-			if callable(self._options.all_pressure_label):
-				file_label = self._options.all_pressure_label(self)
-			elif isinstance(self._options.all_pressure_label, list):
-				file_label = self.get_file_label(*self._options.all_pressure_label)
-			else:
-				file_label = f'bs = {self._params["at_block_size[0]"]}'
-			ret['file_label'] = file_label
+			ret['file_label'] = self.file_label
 
 			self._pressure_data = ret
 
