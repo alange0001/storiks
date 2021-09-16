@@ -176,6 +176,16 @@ class AllFiles:
 		for i in file_list if isinstance(file_list, list) else []:
 			self.add_file(i)
 
+	def print_files(self):
+		"""Print the list of registered experiment files"""
+		maxl = max([len(f.filename) for f in self._file_objs]) if len(self._file_objs) > 0 else 30
+		strf = '{:<' + f'{maxl}' + '} : {}'
+		title = strf.format('File Name', 'Label')
+		print(title)
+		print('-'*(maxl + 20))
+		for f in self._file_objs:
+			print(strf.format(f.filename, f.file_label))
+
 	def add_file(self, filename):
 		f = File(filename, self._options, allfiles=self)
 		self._file_list.append(filename)
@@ -498,7 +508,7 @@ class File:
 
 	def print_params(self):
 		print('Params:')
-		max_l = max([len(x) for x in self._params.keys()])
+		max_l = max([len(x) for x in self._params.keys()]) if len(self._params) > 0 else 20
 		str_f = '{:<' + f'{max_l + 1}' + 's}: {}'
 		for k, v in self._params.items():
 			# if k.find('at_script') >= 0 : continue
@@ -926,7 +936,7 @@ class File:
 		except Exception as e:
 			print(f'ERROR: file_label exception: {str(e)}')
 
-		self._file_label = self._filename_without_ext
+		self._file_label = os.path.basename(self._filename_without_ext)
 		return self._file_label
 
 	def graph_db(self, **kargs):
@@ -2685,6 +2695,8 @@ def getFiles(dirname: str, str_filter: str = None, list_filter: list = None, lam
 	:param lambda_filter: function used to filter the file names (optional)
 	:return: list of experiment files
 	"""
+	if dirname == '':
+		dirname = '.'
 	if not os.path.isdir(dirname):
 		print(f'WARNING: "{dirname}" is not a directory')
 		return []
