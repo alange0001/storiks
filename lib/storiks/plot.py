@@ -79,6 +79,7 @@ class Options:
 	args_pairgrid_kv = dict()
 	use_at3_counters = True
 	at3_ticks = True
+	w_labels = None  # List of concurrent workload labels. By default, it is ['w0', 'w1', ...]
 	fio_folder = None
 	plot_all_ecdf = True
 	plot_all_dbmean = True
@@ -353,6 +354,8 @@ class File:
 		graph_pressure()
 		graph_io()
 		graph_cpu()
+		...
+		graph_all() - plot all graphs enabled in options
 
 	Auxiliary files:
 		{experiment file without extension}.label - create a text file containing a label for this experiment which
@@ -583,6 +586,8 @@ class File:
 			times = list(aux_times.keys())
 			times.sort()
 
+			w_labels = self._options.w_labels if isinstance(self._options.w_labels, list) else []
+
 			i = 0
 			wc = 0
 			while i < len(times):
@@ -592,12 +597,12 @@ class File:
 					ret_wc['time'] = i_time
 				else:
 					ret_wc['time'] = 0
-				ret_wc['name'] = f'w{wc}'
+				wname = f'w{wc}' if wc >= len(w_labels) else w_labels[wc]
+				ret_wc['name'] = wname
 				ret_wc['number'] = wc
-				ret_wc['latex_name'] = f'$w_{{{wc}}}$'
 				for i_at in aux_times[i_time]:
 					ret_wc[i_at[0]] = i_at[1]
-				ret[f'w{wc}'] = ret_wc
+				ret[wname] = ret_wc
 				for j in range(i+1, len(times)):
 					if times[j] > i_time + fuzzy:
 						break
@@ -1673,17 +1678,18 @@ class File:
 			ret['pd1'] = pd1
 
 			if self._options.use_at3_counters:
-				pd2 = pd1.groupby(['w', 'w_counter']).agg({'ops_per_s':'mean'}).sort_values('w_counter')
+				pd2 = pd1.groupby(['w', 'w_counter'], as_index=False).agg({'ops_per_s':'mean'}).sort_values('w_counter')
 			else:
-				pd2 = pd1.groupby(['w', 'w_counter']).agg({'ops_per_s':'mean'}).sort_values('ops_per_s', ascending=False)
+				pd2 = pd1.groupby(['w', 'w_counter'], as_index=False).agg({'ops_per_s':'mean'}).sort_values('ops_per_s', ascending=False)
 
 			ret['pd2'] = pd2
 
-			ret['W_names'] = [x[0] for x in pd2.index]
-			w0 = pd2.loc['w0', 0][0]
+			ret['W_names'] = list(pd2['w'].values)
+			w0 = pd2.loc[pd2['w_counter'] == 0, 'ops_per_s'][0]
 			ret['w0'] = w0
-			ret['W_pressure'] = [i[0] for i in pd2.values]
-			ret['W_normalized'] = [(w0 - i) / w0 for i in ret['W_pressure']]
+			ret['W_pressure'] = list(pd2['ops_per_s'].values)
+			# TODO verify if w0 == 0
+			ret['W_normalized'] = list((w0 - pd2['ops_per_s'].values) / w0)
 
 			ret['time'] = []
 			ret['time_min'] = []
