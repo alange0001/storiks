@@ -240,19 +240,29 @@ class AllFiles:
 			self.graph_pressure()
 
 	def graph_ecdf(self):
-		df = self.pd_data
-		if df is None: return
-		if 'ycsb[0].ops_per_s' not in df.keys() or 'af_name' not in df.keys():
-			print('ERROR: ycsb[0].ops_per_s or af_name not found in pd_data')
+		ax_args = []
+		for f in self._file_objs:
+			df = None
+			for dk in ['ycsb[0]', 'db_bench[0]']:
+				if dk in f.data.keys():
+					df = f.pd_data_exp(dk)
+					break
+			if df is None: continue
+			ax_args.append(dict(data=df, x='ops_per_s', label=f.file_label))
+		if len(ax_args) == 0:
+			print('AllFiles.graph_ecdf ERROR: no data available')
 			return
 
-		g = sns.displot(data=df, x='ycsb[0].ops_per_s', hue='af_name', kind='ecdf')
-		fig = g.fig
+		fig, ax = plt.subplots()
 		fig.set_figheight(3)
-		fig.set_figwidth(12)
-		g.set_axis_labels('tx/s', 'Proportion')
-		ax = g.axes[0][0]
+		fig.set_figwidth(9)
+
+		for i_args in ax_args:
+			sns.ecdfplot(ax=ax, **i_args)
+
+		ax.set(xlabel='tx/s', ylabel='Proportion')
 		ax.grid(which='major', color='#888888', linestyle='--')
+		ax.legend(loc='upper left', ncol=1, frameon=True, bbox_to_anchor=(1.02, 1.), borderaxespad=0)
 
 		if self._options.save:
 			for f in self._options.formats:
@@ -285,7 +295,7 @@ class AllFiles:
 
 		ax.grid(which='major', color='#CCCCCC', linestyle='--')
 		ax.set(xlabel="time (min)", ylabel="tx/s")
-		ax.legend(loc='best', ncol=1, frameon=True)
+		ax.legend(loc='upper left', ncol=1, frameon=True, bbox_to_anchor=(1.02, 1.), borderaxespad=0)
 
 		if self._options.save:
 			for f in self._options.formats:
@@ -1231,7 +1241,7 @@ class File:
 
 		fig, axs = plt.subplots(3, 1)
 		fig.set_figheight(5)
-		fig.set_figwidth(8)
+		fig.set_figwidth(9)
 
 		for ax_i in range(0,3):
 			ax = axs[ax_i]
@@ -1240,27 +1250,24 @@ class File:
 				Yw = df['disk.diskstats.wkB/s']/1024.0
 				Yt = Yr + Yw
 				ax.plot(X, Yr, '-', lw=1, label='read', color='green')
-				ax.plot(X, Yw, '-', lw=1, label='write', color='orange')
-				ax.plot(X, Yt, '-', lw=1, label='total', color='blue')
+				ax.plot(X, Yw, '-', lw=1, label='write', color='orange', alpha=0.8)
+				ax.plot(X, Yt, '-', lw=1, label='total', color='blue', alpha=0.8)
 				ax.set(ylabel="MiB/s")
-				ax.legend(loc='upper right', ncol=3, frameon=True)
+				ax.legend(loc='upper left', ncol=1, frameon=True, bbox_to_anchor=(1.02, 1.), borderaxespad=0)
 			elif ax_i == 1:
 				Yr = df['disk.diskstats.r/s']
 				Yw = df['disk.diskstats.w/s']
 				Yt = Yr + Yw
 				ax.plot(X, Yr, '-', lw=1, label='read', color='green')
-				ax.plot(X, Yw, '-', lw=1, label='write', color='orange')
-				ax.plot(X, Yt, '-', lw=1, label='total', color='blue')
+				ax.plot(X, Yw, '-', lw=1, label='write', color='orange', alpha=0.8)
+				ax.plot(X, Yt, '-', lw=1, label='total', color='blue', alpha=0.8)
 				ax.set(ylabel="IOPS")
-				ax.legend(loc='upper right', ncol=3, frameon=True)
 			elif ax_i == 2:
 				Yr = df['disk.diskstats.read_time_ms']
 				Yw = df['disk.diskstats.write_time_ms']
 				ax.plot(X, Yr, '-', lw=1, label='read', color='green')
-				ax.plot(X, Yw, '-', lw=1, label='write', color='orange')
+				ax.plot(X, Yw, '-', lw=1, label='write', color='orange', alpha=0.8)
 				ax.set(xlabel="time (min)", ylabel="time spent\n(ms)")
-				# ax.set_ylim([-5, 105])
-				ax.legend(loc='upper right', ncol=2, frameon=True)
 
 			#chartBox = ax.get_position()
 			#ax.set_position([chartBox.x0, chartBox.y0, chartBox.width*0.65, chartBox.height])
@@ -1414,15 +1421,14 @@ class File:
 
 		X = [x['time']/60.0 for x in self._data['performancemonitor']]
 		Y = [ sum_active(x['cpu']['percent_total']) for x in self._data['performancemonitor'] ]
-		#print(Y)
-		axs[0].plot(X, Y, '-', lw=1, label='usage (all)')
+		axs[0].plot(X, Y, '-', lw=1, label='usage')
 
 		Y = [i['cpu']['percent_total']['iowait'] for i in self._data['performancemonitor']]
-		axs[0].plot(X, Y, '-', lw=1, label='iowait')
+		axs[0].plot(X, Y, '-', lw=1, label='iowait', alpha=0.8)
 
 		for i in range(0, int(self._data['performancemonitor'][0]['cpu']['count'])):
 			Y = [ sum_active(x['cpu']['percent'][i]) for x in self._data['performancemonitor'] ]
-			axs[1].plot(X, Y, '-', lw=1, label='cpu{}'.format(i))
+			axs[1].plot(X, Y, '-', lw=1, label='cpu{}'.format(i), alpha=0.7)
 
 		aux = (X[-1] - X[0]) * 0.01
 		for ax in axs:
@@ -1434,7 +1440,7 @@ class File:
 		axs[0].set(title=self.get_graph_title(args, "CPU"), ylabel="all CPUs\npercent")
 		axs[1].set(xlabel="time (min)", ylabel="per CPU\npercent")
 
-		axs[0].legend(loc='upper right', ncol=2, frameon=True)
+		axs[0].legend(loc='upper left', ncol=1, frameon=True, bbox_to_anchor=(1.02, 1.), borderaxespad=0)
 
 		self.add_upper_ticks(axs[0], int(X[0]), int(X[-1]), args)
 
