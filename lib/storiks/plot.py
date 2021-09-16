@@ -495,9 +495,11 @@ class File:
 
 	def print_params(self):
 		print('Params:')
+		max_l = max([len(x) for x in self._params.keys()])
+		str_f = '{:<' + f'{max_l + 1}' + 's}: {}'
 		for k, v in self._params.items():
-			if k.find('at_script') >= 0 : continue
-			print('{:<20s}: {}'.format(k, v))
+			# if k.find('at_script') >= 0 : continue
+			print(str_f.format(k, v))
 		print()
 
 	def print_ycsb_commands(self):
@@ -1253,7 +1255,7 @@ class File:
 				self.add_upper_ticks(ax, int(X.min()), int(X.max()), args)
 
 			self.set_x_ticks(ax)
-			axs[0].set(title=self.get_graph_title(args, "I/O stats"))
+			axs[0].set(title=self.get_graph_title(args, "diskstats"))
 
 		fig.tight_layout()
 
