@@ -785,6 +785,8 @@ class File:
 		return value
 
 	def after_pd_tag_quantiles(self):
+		if coalesce(self._params.get('num_ydbs'), 0) == 0:
+			return
 		df = self.pd_data
 		keys = df.keys()
 		if 'w_name' not in keys:
