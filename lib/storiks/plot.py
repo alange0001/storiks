@@ -1569,14 +1569,17 @@ class File:
 				ax0 = ax
 
 			ax.grid()
-			cur_at = self._data['access_time3[{}]'.format(i)]
+			cur_at = self._data[f'access_time3[{i}]']
 			X = [j['time']/60.0 for j in cur_at]
-			Y = [j['write_ratio'] if j['wait'] == 'false' else None for j in cur_at]
+			Y = [j.get('write_ratio') if j['wait'] == 'false' else None for j in cur_at]
 			ax.plot(X, Y, '-', lw=1.5, label='write_ratio (wr)', color='orange')
-			Y = [j['random_ratio'] if j['wait'] == 'false' else None for j in cur_at]
+			Y = [j.get('random_ratio') if j['wait'] == 'false' else None for j in cur_at]
 			ax.plot(X, Y, '-.', lw=1.5, label='random_ratio (rr)', color='blue')
 
-			# TODO add iodepth
+			ax2 = ax.twinx()
+			Y = [j.get('iodepth') if j['wait'] == 'false' else None for j in cur_at]
+			ax2.plot(X, Y, '-', lw=1.5, label='iodepth (d)', color='green')
+			ax2.set(ylabel='iodepth')
 
 			ax_set = dict()
 
@@ -1584,9 +1587,10 @@ class File:
 			if i == 0:
 				ax_set['title'] = self.get_graph_title(args, 'Concurrent Workloads')
 			if i == self._num_at -1:
+				p = -0.067 * self._num_at
 				ax_set['xlabel'] = "time (min)"
-				ax.legend(bbox_to_anchor=(0., -.8, 1., .102), loc='lower left',
-					ncol=2, mode="expand", borderaxespad=0.)
+				ax.legend(loc='upper left', ncol=2, bbox_to_anchor=(0., p, 1., p), borderaxespad=0.)
+				ax2.legend(loc='upper right', ncol=2, bbox_to_anchor=(0., p, 1., p), borderaxespad=0.)
 			if i < self._num_at - 1:
 				ax.xaxis.set_ticklabels([])
 
