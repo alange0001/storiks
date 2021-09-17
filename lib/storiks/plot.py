@@ -78,12 +78,27 @@ class Options:
 	args_pairgrid_kv = dict()
 	use_at3_counters = True
 	at3_ticks = True
-	w_labels = None  # List of concurrent workload labels. By default, it is ['w0', 'w1', ...]
+	_w_labels: list = None  # List of concurrent workload labels. By default, it is ['w0', 'w1', ...]
+	@property
+	def w_labels(self) -> list:
+		"""Replace the concurrent workload labels using a list of strings.
+		By default, the names used to label the concurrent workloads are 'w0', 'w1', ..."""
+		return self._w_labels
+	@w_labels.setter
+	def w_labels(self, val):
+		self._w_labels = val
 	fio_folder = None
 	plot_all_ecdf = True
 	plot_all_dbmean = True
 	plot_all_pressure = True
-	file_label = None
+	_file_label = None
+	@property
+	def file_label(self):
+		"""Define the behavior of the property File.file_label"""
+		return self._file_label
+	@file_label.setter
+	def file_label(self, val):
+		self._file_label = val
 
 	def __init__(self, **kargs):
 		self._process_args(kargs)
@@ -881,6 +896,23 @@ class File:
 	_file_label = None
 	@property
 	def file_label(self):
+		"""A simplified name for the current experiment being used in graphs with multiple experiments.
+		This property is controlled by the property "options.file_label," being "options" an instance of Options
+		registered in the initialization of the current experiment.
+
+		options.file_label is None:
+			1. return the name present in the .label file if it exists
+			   (.label file is a file with the same name of the experiment plus ".label" extension)
+			2. return the file name without extension
+		options.file_label as a function:
+			return options.file_l(self)
+		options.file_label as a list:
+			return a list of variables obtained from the experiment file:
+				- workload: name of the workload
+				- kernel: kernel name
+				- re:<pattern>: regular expression applied to the file name of the experiment
+				- param:<name>: value of an specific parameter of the experiment
+		"""
 		if self._file_label is not None:
 			return self._file_label
 
