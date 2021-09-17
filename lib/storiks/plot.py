@@ -47,7 +47,6 @@ class Options:
 	trace_exceptions = False
 	formats = ['png', 'pdf']
 	print_params = False
-	file_description = None  # str or callable f(obj : File) -> str
 	save = False
 	savePlotData = False
 	graphTickMajor = 'auto'
@@ -96,12 +95,13 @@ class Options:
 
 	def _process_args(self, args: dict) -> None:
 		deprecated = {
-			'file_start_time': 'parameter is no longer supported',
+			'file_start_time': 'this parameter is no longer supported',
 			'db_mean_interval': 'use args_db["mean_interval"] instead',
 			'pressure_decreased': 'use args_pressure["mark_decreased"] instead',
 			'print_pressure_values': 'use args_pressure["print_values"] instead',
-			'plot_io_norm': 'parameter is no longer supported',
+			'plot_io_norm': 'this parameter is no longer supported',
 			'all_pressure_label': 'use file_label',
+			'file_description': 'this parameter is no longer supported'
 		}
 		for k, v in args.items():
 			if k == 'plot_nothing':
@@ -2411,11 +2411,6 @@ class File:
 	def graph_all(self):
 		print(f'Graphs from file "{self._filename}":')
 		description = self._filename
-		if self._options.file_description is not None:
-			if isinstance(self._options.file_description, str):
-				description = self._options.file_description
-			elif callable(self._options.file_description):
-				description = self._options.file_description(self)
 		if self._options.print_params:
 			self.print_params()
 			
