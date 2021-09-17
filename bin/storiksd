@@ -21,6 +21,7 @@ import argparse
 import traceback
 import shlex
 import shutil
+import glob
 import json
 import lzma
 import datetime
@@ -732,6 +733,12 @@ class NotebookServer:
 					log.info(f'copy example file: {f}')
 					shutil.copy(fs, fd)
 					shutil.chown(fd, os.getenv('STORIKS_USER'))
+				if os.path.isdir(fs) and not os.path.exists(fd):
+					log.info(f'copy example directory: {f}')
+					shutil.copytree(fs, fd)
+					shutil.chown(fd, os.getenv('STORIKS_USER'))
+					for faux in glob.glob(f'{fd}/*'):
+						shutil.chown(faux, os.getenv('STORIKS_USER'))
 		except Exception as e:
 			log.error(f'Failed to copy notebook examples: {str(e)}')
 
