@@ -1,0 +1,5 @@
+--flagfile=base.flags
+--duration=15
+--warm_period=5
+--num_ydbs=1
+--ydb_create

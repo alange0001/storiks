@@ -1,0 +1,3 @@
+--flagfile=base_pressure_iodepth.flags
+--ydb_workload=workloadb
+--at_params=--flush_blocks=0 --wait --random_ratio=1.0 --write_ratio=0

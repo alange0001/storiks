@@ -1,0 +1,18 @@
+--stats_interval=2
+--sync_stats
+--perfmon
+### YCSB basic options ###
+--rocksdb_config_file=/output/rocksdb.options
+--num_ydbs=0
+--ydb_num_keys=50000000
+--ydb_threads=4
+--ydb_socket
+--ydb_path=/workdata/rocksdb_ycsb_0
+--ydb_workload=workloadb
+### Access_time3 options ###
+--num_at=0
+--at_dir=/workdata/at3
+--at_file=0#1#2#3
+--at_io_engine=libaio
+--at_block_size=4
+--at_params=--flush_blocks=0 --wait --random_ratio=1.0 --write_ratio=0

@@ -1,0 +1,12 @@
+--flagfile=base.flags
+# duration will be redefined by --at_script_gen
+--duration=0
+--warm_period=10
+### YCSB options ###
+--num_ydbs=1
+### Access_time3 options ###
+--num_at=1
+--at_script_gen=iodepth
+--at_script_gen_iodepth_max=64
+--at_script_gen_interval=5
+--at_script_gen_w0_interval=10

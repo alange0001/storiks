@@ -1,0 +1,7 @@
+--flagfile=base.flags
+--duration=100
+--warm_period=0
+--num_at=1
+--at_block_size=4
+--at_script=0:iodepth=1;4m:iodepth=2;7m:iodepth=4;10m:iodepth=6;13m:iodepth=8;16m:iodepth=10;19m:iodepth=12;22m:iodepth=14;25m:iodepth=16;28m:iodepth=18;31m:iodepth=20;34m:iodepth=22;37m:iodepth=24;40m:iodepth=26;43m:iodepth=28;46m:iodepth=30;49m:iodepth=32;52m:iodepth=34;55m:iodepth=36;58m:iodepth=38;61m:iodepth=40;64m:iodepth=42;67m:iodepth=44;70m:iodepth=46;73m:iodepth=48;76m:iodepth=50;79m:iodepth=52;82m:iodepth=54;85m:iodepth=56;88m:iodepth=58;91m:iodepth=60;94m:iodepth=62;97m:iodepth=64
+--at_params=--flush_blocks=0 --random_ratio=1.0 --write_ratio=0
