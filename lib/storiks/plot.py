@@ -1506,28 +1506,26 @@ class File:
 		fig.set_figheight(5)
 		fig.set_figwidth(8)
 
-		ax2 = None
 		for i in range(0,self._num_at):
 			ax = axs[i] if self._num_at > 1 else axs
 			ax.grid()
-			cur_at = self._data['access_time3[{}]'.format(i)]
+			cur_at = self._data[f'access_time3[{i}]']
 			X = [j['time']/60.0 for j in cur_at]
-			Y = [j['total_MiB/s'] if j['wait'] == 'false' else None for j in cur_at]
-			ax.plot(X, Y, '-', lw=1, label='total', color='blue')
-			Y = [j['read_MiB/s'] if j['wait'] == 'false' else None for j in cur_at]
+			Y = [j.get('read_MiB/s') if j['wait'] == 'false' else None for j in cur_at]
 			ax.plot(X, Y, '-', lw=1, label='read', color='green')
-			Y = [j['write_MiB/s'] if j['wait'] == 'false' else None for j in cur_at]
-			ax.plot(X, Y, '-', lw=1, label='write', color='orange')
+			Y = [j.get('write_MiB/s') if j['wait'] == 'false' else None for j in cur_at]
+			ax.plot(X, Y, '-', lw=1, label='write', color='orange', alpha=0.8)
+			Y = [j.get('total_MiB/s') if j['wait'] == 'false' else None for j in cur_at]
+			ax.plot(X, Y, '-.', lw=1, label='total', color='blue', alpha=0.4)
 
 			ax_set = dict()
 			ax_set['ylabel'] = f"at3[{i}]\nMB/s"
 
 			if i == 0:
 				ax_set['title'] = self.get_graph_title(args, "access_time3 (at3): performance")
+				ax.legend(loc='upper left', ncol=1, bbox_to_anchor=(1.02, 1.), borderaxespad=0.)
 			if i == self._num_at -1:
 				ax_set['xlabel'] = "time (min)"
-				ax.legend(bbox_to_anchor=(0., -.8, 1., .102), loc='lower left',
-					ncol=3, mode="expand", borderaxespad=0.)
 			if i>=0 and i < self._num_at -1:
 				ax.xaxis.set_ticklabels([])
 
@@ -1537,13 +1535,7 @@ class File:
 				self.add_upper_ticks(ax, int(X[0]), int(X[-1]), args)
 
 			self.set_x_ticks(ax)
-
 			ax.set(**ax_set)
-			#ax.set_yscale('log')
-
-			#chartBox = ax.get_position()
-			#ax.set_position([chartBox.x0, chartBox.y0, chartBox.width*0.75, chartBox.height])
-			#ax.legend(loc='upper center', bbox_to_anchor=(1.25, 1.0), ncol=2, frameon=True)
 
 		plt.subplots_adjust(hspace=0.1)
 
