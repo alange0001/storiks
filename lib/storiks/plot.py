@@ -1894,10 +1894,9 @@ class File:
 			ax2.set(ylabel="IOPS")
 
 			if i == (len(axs)-1):
-				ax.legend(bbox_to_anchor=(0., -.8, .48, .102), loc='lower left',
-					ncol=2, mode="expand", borderaxespad=0.)
-				ax2.legend(bbox_to_anchor=(.52, -.8, .48, .102), loc='lower right',
-					ncol=2, mode="expand", borderaxespad=0.)
+				p = -0.05 * len(axs)
+				ax.legend(loc='upper left', ncol=2, bbox_to_anchor=(0., p, 1., p), borderaxespad=0)
+				ax2.legend(loc='upper right', ncol=2, bbox_to_anchor=(0., p, 1., p), borderaxespad=0)
 
 		aux = (X[-1] - X[0]) * 0.01
 		for ax in axs:
