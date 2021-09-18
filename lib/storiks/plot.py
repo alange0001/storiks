@@ -376,6 +376,71 @@ class AllFiles:
 				fig.savefig(save_name, bbox_inches="tight")
 		plt.show()
 
+	def graph_join_pressure(self) -> None:
+		pressures = list(filter(
+			lambda x: x[1] is not None,
+			[(f, f.join_pressures()) for f in self._file_objs]))
+		if len(pressures) == 0:
+			return
+
+		colors = plt.get_cmap('tab10').colors
+		n_data = len(pressures)
+
+		fig = plt.figure()
+		gs = fig.add_gridspec(1, 2, hspace=0., wspace=0.)
+		axs = gs.subplots()
+		fig.set_figheight(0.7 * n_data)
+		fig.set_figwidth(20)
+
+		axs[0].set(title='Interference: KV-store on concurrent workloads')
+		axs[1].set(title='Interference: concurrent workloads on KV-store')
+
+		Y_labels = []
+		Y_ticks = []
+		i_ax = 0
+		min_list0 = [0.]
+		min_list1 = [0.]
+		for file, data in pressures:
+			line_label = file.file_label
+			X1 = data['norm_pressure_kv']
+			X0 = data['norm_pressure_at']
+			X_labels = data['w_name']
+			Y_labels.append(line_label)
+			min_list0.append(X0.min())
+			min_list1.append(X1.min())
+
+			for i in range(len(X1)):
+				if X1[i] is not None:
+					axs[1].annotate(f'{X_labels[i]}', xy=(X1[i], i_ax), xytext=(X1[i] - 0.007, i_ax + 0.2), rotation=90)
+				if X0[i] is not None:
+					axs[0].annotate(f'{X_labels[i]}', xy=(X0[i], i_ax), xytext=(X0[i] + 0.007, i_ax + 0.2), rotation=90)
+
+			axs[1].plot(X1, [i_ax for x in X1], 'o', color=colors[0])
+			axs[0].plot(X0, [i_ax for x in X1], 'o', color=colors[0])
+			Y_ticks.append(i_ax)
+			i_ax -= 1
+
+		axs[1].set_xlim([min(min_list1)-0.05, 1.05])
+		axs[0].set_xlim([1.05, min(min_list0)-0.05])
+		for ax in axs:
+			ax.set_ylim([i_ax + 0.8, 0.7])
+			ax.yaxis.set_ticks(Y_ticks)
+
+			ax.xaxis.set_major_locator(MultipleLocator(0.1))
+			ax.xaxis.set_minor_locator(AutoMinorLocator(4))
+			ax.grid(which='major', color='#888888', linestyle='--')
+			ax.grid(which='minor', color='#CCCCCC', linestyle=':')
+
+			ax.set(xlabel="normalized pressure: $(\\rho(w_0)-\\rho(w_i)) / \\rho(w_0)$")
+		axs[0].yaxis.set_ticklabels(Y_labels)
+		axs[1].yaxis.set_ticklabels([None for y in Y_labels])
+
+		if self._options.save:
+			for f in self._options.formats:
+				save_name = f'{self._filename}-pressure.{f}'
+				fig.savefig(save_name, bbox_inches="tight")
+		plt.show()
+
 
 class File:
 	"""Interpret and plot graphs from an experiment file (.out or .out.xz).
@@ -1830,6 +1895,52 @@ class File:
 				save_name = f'{self._filename_without_ext}-pressure.{f}'
 				fig.savefig(save_name, bbox_inches="tight")
 		plt.show()
+
+	_at3_steady_file = None
+	@property
+	def at3_steady_file(self):
+		"""File object containing an experiment with the same concurrent workloads
+		running without the key-value store.
+
+		That experiment is necessary to calculate the normalized pressure from the perspective
+		of the concurrent workloads. See function File.join_pressures().
+
+		Important: Concurrent workload labels must coincide. Use Options.w_labels.
+		"""
+		return self._at3_steady_file
+	@at3_steady_file.setter
+	def at3_steady_file(self, val):
+		self._at3_steady_file = val
+
+	def join_pressures(self):
+		try:
+			pressure_data = self.pressure_data
+			if pressure_data is None:
+				print('ERROR in join_pressures: no pressure data')
+				return
+			df2 = pd.DataFrame({
+				'w_counter': [i for i in range(len(pressure_data['W_names']))],
+				'w_name': pressure_data['W_names'],
+				'pressure_kv': pressure_data['W_pressure'],
+				'norm_pressure_kv': pressure_data['W_normalized']})
+			if self.at3_steady_file is None:
+				print(f'WARN: no at3_steady_file defined for File "{self.filename}"')
+				df2['norm_pressure_at'] = None
+				return df2
+
+			mean_dfs = []
+			for f in (self, self.at3_steady_file):
+				df = f.pd_data_exp('access_time3[0]')
+				for w in f.w_list.values():
+					df.loc[df['time'] >= w['time'], 'w_name'] = w['name']
+				mean_dfs.append(df.groupby('w_name', as_index=False).agg({'total_MiB/s': 'mean'}))
+			df = pd.merge(*mean_dfs, how='outer', on='w_name')
+			df['norm_pressure_at'] = (df['total_MiB/s_y'] - df['total_MiB/s_x']) / df['total_MiB/s_y']
+
+			df_ret = pd.merge(df, df2, how='outer', on='w_name').sort_values('w_counter')
+			return df_ret
+		except Exception as e:
+			print(f'ERROR: join_pressures exception: {str(e)}')
 
 	def get_container_names(self):
 		perfmon_data = self._data.get('performancemonitor')
