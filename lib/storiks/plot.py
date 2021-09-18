@@ -431,9 +431,10 @@ class AllFiles:
 			ax.grid(which='major', color='#888888', linestyle='--')
 			ax.grid(which='minor', color='#CCCCCC', linestyle=':')
 
-			ax.set(xlabel="normalized pressure: $(\\rho(w_0)-\\rho(w_i)) / \\rho(w_0)$")
 		axs[0].yaxis.set_ticklabels(Y_labels)
 		axs[1].yaxis.set_ticklabels([None for y in Y_labels])
+		axs[0].set(xlabel="normalized pressure: $(\\rho(w_i^b)-\\rho(w_i^a)) / \\rho(w_i^b)$")
+		axs[1].set(xlabel="normalized pressure: $(\\rho(w_0)-\\rho(w_i)) / \\rho(w_0)$")
 
 		if self._options.save:
 			for f in self._options.formats:
