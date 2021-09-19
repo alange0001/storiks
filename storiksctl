@@ -35,7 +35,7 @@ class Config:
 		d = dict()
 		self._conf = d
 		d['PROJECT_NAME'   ]   = 'storiks'
-		d['PROJECT_VERSION']   = '0.1'
+		d['PROJECT_VERSION']   = '0.2'
 		d['DOCKER_ACCOUNT' ]   = 'alange0001'
 		d['DOCKER_IMAGE'   ]   = f'{d["DOCKER_ACCOUNT"]}/{d["PROJECT_NAME"]}:{d["PROJECT_VERSION"]}'
 		d['COMMUNICATION_DIR'] = '/tmp/storiks'  # default communication directory between containers
