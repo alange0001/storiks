@@ -30,15 +30,42 @@ def _storiksd_send(cmd):
 send = _storiksd_send
 
 def list():
+	"""Send the command "list" to storiksd.
+	Print the list of commands scheduled in storiksd.
+
+	:return: None
+	"""
 	print(_storiksd_send('list'))
 
 def status(number=''):
+	"""Send the command "status" to storiksd.
+	Print the status of a command/experiment scheduled in storiksd.
+
+	:param number: Number of the scheduled command. If not informed, the last one will be selected.
+	:return: None
+	"""
 	print(_storiksd_send(f'status {number}'))
 
 def cancel(number=''):
+	"""Send the command "cancel" to storiksd.
+	Cancel a command/experiment scheduled in storiksd.
+
+	:param number: Number of the scheduled command to cancel. If not informed, the last one will be selected.
+	:return: None
+	"""
 	print(_storiksd_send(f'cancel {number}'))
 
 def schedule(cmd, output=None, append=False, overwrite=False, compress=False):
+	"""Send the command "schedule" to storiksd.
+	Schedule a command or experiment to be executed by storiksd.
+
+	:param output: Output file name (absolute or relative to /output (--output_dir) inside the storiks container)
+	:param append: Append the stdout and stderr to the output file instead of overwriting it.
+	:param overwrite: Overwrite the output file. If both overwrite and append parameters are False,
+	                  the experiment will fail if the informed output file name exists.
+	:param compress: Compress the output file using xz.
+	:return: None
+	"""
 	prefix_cmd = ['schedule']
 	if output is not None: prefix_cmd += ['--output', output]
 	if append is True: prefix_cmd.append('--append')
