@@ -55,4 +55,4 @@ Storiks is composed of the following executables:
 			```
 			./storiksctl send schedule --output experimentX.out storiks --flagfile=experimentX.flags
 			```
-		* From notebook interface, use the python function ***storiks.run.send***. See [/output/examples/run.ipynb](examples/run.ipynb) for more examples.
+		* From notebook interface, use the python function ***storiks.run.send***. See [/output/examples/run.ipynb](examples/examples/run.ipynb) for more examples.
