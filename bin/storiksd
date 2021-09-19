@@ -397,7 +397,7 @@ class CommandServer:
 				if sc is not None:
 					send(sc.info('json' if cmd_args.json else 'text'))
 				else:
-					send(f'ERROR: there is no scheduled commands or the informed number is out of range')
+					send(f'ERROR: there are no scheduled commands or the informed number is out of range')
 
 			elif cmd_args.action == 'cancel':
 				sc = self.get_scheduled_command(cmd_args.number)
@@ -408,7 +408,7 @@ class CommandServer:
 					else:
 						send(f'command number {sc.number} already finished with exit code {sc.exitcode}')
 				else:
-					send(f'ERROR: there is no scheduled commands or the informed number is out of range')
+					send(f'ERROR: there are no scheduled commands or the informed number is out of range')
 
 		except Exception as e:
 			log.error(f'CommandServer connection [{count}] exception: {str(e)}')
@@ -683,7 +683,7 @@ class NotebookServer:
 		_function_ = 'NotebookServer'
 		log.debug(f'{_function_}: constructor')
 		if os.getenv('STORIKS_USER') is None:
-			raise Exception(f'Failed to start jupyter-notebook. Environment variable STORIKS_USER not defined.')
+			raise Exception(f'Failed to start jupyter-notebook. Undefined environment variable STORIKS_USER.')
 
 		self._copy_examples()
 
@@ -740,7 +740,7 @@ class NotebookServer:
 					for faux in glob.glob(f'{fd}/*'):
 						shutil.chown(faux, os.getenv('STORIKS_USER'))
 		except Exception as e:
-			log.error(f'Failed to copy notebook examples: {str(e)}')
+			log.error(f'Failed to copy the notebook examples: {str(e)}')
 
 	def _handle_stdout(self):
 		_function_ = 'NotebookServer._handle_stdout()'
