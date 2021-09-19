@@ -37,4 +37,22 @@ Storiks (Storage Resource Interferometer for Key-value Stores) is a framework de
 	$ ./storiksctl stop
 	```
 
-### Operation
+More information about storiksctl commands is available using --help parameter.
+
+## Main Executables
+
+Storiks is composed of the following executables:
+
+* **storiksctl** (host side) - Controls the initialization, status, and communication with storiks container.
+* **storiksd** (inside the storiks container) - Is responsible for setting up the storiks container environment, initializing its main subprocesses, and controlling the scheduled experiments.
+	* There is must be only one instance of storiksd running inside the storiks container.
+	* User can send commands to storiksd from the host by using the ***storiksctl send*** command. Use ***storiksctl send help*** to see the commands available.
+* **storiks** (inside the storiks container) - Controls the lifetime of the experiments by initializing one container per concurrent workload, and reporting statistics. Each execution of storiks corresponds to one experiment and there must be only one instance of this program running at a time.
+	* Each experiment may be defined as a list of parameters passed to the storiks program or even as [flagfiles](https://gflags.github.io/gflags/), preferably inside /output (--output_dir).
+	* Use ***storiks --help*** inside storiks container to see the available options.
+	* It is recommended to schedule the experiments in **storiksd**.
+		* From host, use:
+			```
+			./storiksctl send schedule --output experimentX.out storiks --flagfile=experimentX.flags
+			```
+		* From notebook interface, use the python function ***storiks.run.send***. See [/output/examples/run.ipynb](examples/run.ipynb) for more examples.
