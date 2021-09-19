@@ -34,7 +34,7 @@ Storiks (Storage Resource Interferometer for Key-value Stores) is a framework de
 	```
 1. Stop when no longer necessary:
 	```
-	$ ./storiksctl terminal
+	$ ./storiksctl stop
 	```
 
 ### Operation
