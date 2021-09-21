@@ -39,9 +39,13 @@ Storiks (Storage Resource Interferometer for Key-value Stores) is a framework de
 
 More information about storiksctl commands is available using --help parameter.
 
-## Main Executables
+## Architecture
 
-Storiks is composed of the following executables:
+The following diagram depicts the main components of the storiks framework.
+
+![Storiks Architecture](.img/storiks.png)
+
+### Main Executables
 
 * **storiksctl** (host side) - Controls the initialization, status, and communication with storiks container.
 * **storiksd** (inside the storiks container) - Is responsible for setting up the storiks container environment, initializing its main subprocesses, and controlling the scheduled experiments.
