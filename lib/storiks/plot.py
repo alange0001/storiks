@@ -275,7 +275,7 @@ class AllFiles:
 		for i_args in ax_args:
 			sns.ecdfplot(ax=ax, **i_args)
 
-		ax.set(xlabel='tx/s', ylabel='Proportion')
+		ax.set(xlabel='kv:ops/s', ylabel='Proportion')
 		ax.grid(which='major', color='#888888', linestyle='--')
 		ax.legend(loc='upper left', ncol=1, frameon=True, bbox_to_anchor=(1.02, 1.), borderaxespad=0)
 
@@ -300,7 +300,10 @@ class AllFiles:
 			if fp is None:
 				continue
 
-			sns.lineplot(ax=ax, x='w_name', y='ycsb[0].ops_per_s', data=f.pd_data,
+			ename = coalesce(*[n if n in f.data.keys() else None for n in ['ycsb[0]', 'db_bench[0]']])
+			if ename is None: continue
+
+			sns.lineplot(ax=ax, x='w_name', y=f'{ename}.ops_per_s', data=f.pd_data,
 			             label=fp['file_label'] if fp is not None else 'None')
 
 		if self._options.db_xlim is not None:
@@ -309,7 +312,7 @@ class AllFiles:
 			ax.set_ylim( self._options.db_ylim )
 
 		ax.grid(which='major', color='#CCCCCC', linestyle='--')
-		ax.set(xlabel="time (min)", ylabel="tx/s")
+		ax.set(xlabel="concurrent workloads", ylabel="kv:ops/s")
 		ax.legend(loc='upper left', ncol=1, frameon=True, bbox_to_anchor=(1.02, 1.), borderaxespad=0)
 
 		if self._options.save:
