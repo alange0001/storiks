@@ -91,6 +91,7 @@ class Options:
 	plot_all_ecdf = True
 	plot_all_dbmean = True
 	plot_all_pressure = True
+	plot_all_io_w = False
 	_file_label = None
 	@property
 	def file_label(self):
@@ -253,6 +254,8 @@ class AllFiles:
 			self.graph_dbmean()
 		if self._options.plot_all_pressure:
 			self.graph_pressure()
+		if self._options.plot_all_io_w:
+			self.graph_io_w()
 
 	def graph_ecdf(self):
 		ax_args = []
@@ -444,6 +447,26 @@ class AllFiles:
 				save_name = f'{self._filename}-pressure.{f}'
 				fig.savefig(save_name, bbox_inches="tight")
 		plt.show()
+
+	def graph_io_w(self):
+		fig, ax = plt.subplots()
+		fig.set_figheight(3)
+		fig.set_figwidth(12)
+
+		for f in self:
+			df = f.pd_data_exp('performancemonitor')
+			if df is None: continue
+			df['disk.diskstats.MiB/s'] = (df['disk.diskstats.rkB/s'] + df['disk.diskstats.wkB/s']) / 1024.
+			for w in f.w_list.values():
+				df.loc[df['time'] >= w['time'], 'w_name'] = w['name']
+				df.loc[df['time'] >= w['time'], 'w'] = int(w['number'])
+			# mean_dfs.append(df.groupby(['w', 'w_name'], as_index=False).agg({'disk.diskstats.MiB/s': 'mean'}))
+			sns.lineplot(ax=ax, x='w_name', y=f'disk.diskstats.MiB/s', data=df,
+						 label=f.file_label)
+
+		ax.grid(which='major', color='#CCCCCC', linestyle='--')
+		ax.set(xlabel="concurrent workloads", ylabel="disk:MiB/s")
+		ax.legend(loc='upper left', ncol=1, frameon=True, bbox_to_anchor=(1.02, 1.), borderaxespad=0)
 
 
 class File:
