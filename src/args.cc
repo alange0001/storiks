@@ -178,9 +178,11 @@ static std::pair<std::string, uint32_t> pressure_scale(Args* args) {
 	std::vector<std::string> ret;
 	uint32_t jc = wait;
 
+	const std::string wait_str = (args->at_script_gen_wait) ? "" : "=false";
+
 	if (args->at_script_gen == "read_to_write") {
 		for (uint32_t i=0; i < args->num_at; i++) {
-			ret.push_back(format("0:wait;0:write_ratio=0;{}m:wait=false", jc));
+			ret.push_back(format("0:wait{};0:write_ratio=0;{}m:wait=false", wait_str, jc));
 			jc += interval;
 		}
 		for (const auto& wr: std::vector<std::string>{"0.1", "0.2", "0.3", "0.5", "0.7", "1"}) {
@@ -192,7 +194,7 @@ static std::pair<std::string, uint32_t> pressure_scale(Args* args) {
 
 	} else if (args->at_script_gen == "read_to_write2") { // imported from script_gen 4 of the former rocksdb_test_helper
 		for (uint32_t i=0; i < args->num_at; i++) {
-			ret.push_back(format("0:wait;0:write_ratio=0;{}m:wait=false", jc));
+			ret.push_back(format("0:wait{};0:write_ratio=0;{}m:wait=false", wait_str, jc));
 		}
 		jc += interval;
 		for (uint32_t i=0; i < args->num_at; i++) {
@@ -203,6 +205,18 @@ static std::pair<std::string, uint32_t> pressure_scale(Args* args) {
 			ret[i] += format(";{}m:write_ratio=0.9", jc);
 		}
 		jc += interval;
+
+	} else if (args->at_script_gen == "read_to_write3") {
+		for (uint32_t i=0; i < args->num_at; i++) {
+			ret.push_back(format("0:wait{};0:write_ratio=0;{}m:wait=false", wait_str, jc));
+			jc += interval;
+		}
+		for (const auto& wr: std::vector<std::string>{"0.1", "0.5", "0.9", "1"}) {
+			for (uint32_t i=0; i < args->num_at; i++) {
+				ret[i] += format(";{}m:write_ratio={}", jc, wr);
+				jc += interval;
+			}
+		}
 
 	} else if (args->at_script_gen == "active_instances") {
 		/* activate one access_time3 instance per interval simulating an increase of iodepth
@@ -222,10 +236,27 @@ static std::pair<std::string, uint32_t> pressure_scale(Args* args) {
 			if (i == "")
 				i = "libaio"; // set libaio as default
 		for (uint32_t i=0; i < args->num_at; i++) {
-			ret.push_back(format("0:wait;0:iodepth=1;{}m:wait=false", jc));
+			ret.push_back(format("0:wait{};0:iodepth=1;{}m:wait=false", wait_str, jc));
 		}
 		jc += interval;
 		for (uint32_t d=2; d <= args->at_script_gen_iodepth_max; d+=args->at_script_gen_iodepth_step) {
+			for (uint32_t i=0; i < args->num_at; i++) {
+				ret[i] += format(";{}m:iodepth={}", jc, d);
+			}
+			jc += interval;
+		}
+
+	} else if (args->at_script_gen == "iodepth2") {
+		/* instruct the access_time3 to increase iodepth internally
+		 * (require --at_io_engine=X where X is libaio or prwv2) */
+		for (auto& i : args->at_io_engine)
+			if (i == "")
+				i = "libaio"; // set libaio as default
+		for (uint32_t i=0; i < args->num_at; i++) {
+			ret.push_back(format("0:wait{};0:iodepth=1;{}m:wait=false", wait_str, jc));
+		}
+		jc += interval;
+		for (uint32_t d=2; d <= args->at_script_gen_iodepth_max; d*=args->at_script_gen_iodepth_step) {
 			for (uint32_t i=0; i < args->num_at; i++) {
 				ret[i] += format(";{}m:iodepth={}", jc, d);
 			}

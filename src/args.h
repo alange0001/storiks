@@ -99,7 +99,12 @@ using std::function;
 	_f(at_script_gen, string, DEFINE_string,                      \
 		"",                                                       \
 		"Generate --at_script automatically (mutually exclusive). Values: read_to_write, read_to_write2, active_instances, and iodepth.", \
-		((std::set<std::string>{"", "read_to_write", "read_to_write2", "active_instances", "iodepth"}).count(value) > 0), \
+		((std::set<std::string>{"", "read_to_write", "read_to_write2", "read_to_write3", "active_instances", "iodepth", "iodepth2"}).count(value) > 0), \
+		nullptr)                                                  \
+	_f(at_script_gen_wait, bool, DEFINE_bool,                     \
+		true,                                                     \
+		"Wait until the w0 interval finishes.",                   \
+		true,                                                     \
 		nullptr)                                                  \
 	_f(at_script_gen_w0_interval, uint32_t, DEFINE_uint32,        \
 		10,                                                       \
@@ -113,12 +118,12 @@ using std::function;
 		nullptr)                                                  \
 	_f(at_script_gen_iodepth_max, uint32_t, DEFINE_uint32,        \
 		32,                                                       \
-		"Max iodepth used by --at_script_gen=iodepth.",           \
+		"Max iodepth used by --at_script_gen=iodepth and iodepth2.", \
 		value > 0,                                                \
 		nullptr)                                                  \
 	_f(at_script_gen_iodepth_step, uint32_t, DEFINE_uint32,       \
 		2,                                                        \
-		"iodepth increment step used by --at_script_gen=iodepth.", \
+		"iodepth increment step used by --at_script_gen=iodepth or multiplication factor used by --at_script_gen=iodepth2.", \
 		value > 0,                                                \
 		nullptr)                                                  \
 	_f(docker_image, string, DEFINE_string,                       \

@@ -1,6 +1,6 @@
 PROJECT_NAME = "storiks"
-PROJECT_VERSION = "0.2"
+PROJECT_VERSION = "0.3"
 DOCKER_ACCOUNT = "alange0001"
-DOCKER_IMAGE = "alange0001/storiks:0.2"
+DOCKER_IMAGE = "alange0001/storiks:0.3"
 COMMUNICATION_DIR = "/tmp/storiks"
 NOTEBOOK_URL_FILE = "jupyter-notebook.url"
