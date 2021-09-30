@@ -76,6 +76,7 @@ class Options:
 	args_pairgrid = dict()
 	plot_pairgrid_kv = True
 	args_pairgrid_kv = dict()
+	plot_ecdf_grid = True
 	use_at3_counters = True
 	at3_ticks = True
 	_w_labels: list = None  # List of concurrent workload labels. By default, it is ['w0', 'w1', ...]
@@ -2452,6 +2453,9 @@ class File:
 		plt.show()
 
 	def graph_pairgrid_kv(self, **kargs):
+		if 'ycsb[0]' not in self._data.keys() or 'performancemonitor' not in self._data.keys():
+			return
+
 		cols = {
 			"ycsb[0].ops_per_s": "ops/s",
 			'performancemonitor.containers.ycsb_0.blkio.serviced/s.Read': 'r/s',
@@ -2493,6 +2497,9 @@ class File:
 		plt.show()
 
 	def graph_ecdf_grid(self, **kargs):
+		if 'ycsb[0]' not in self._data.keys() or 'performancemonitor' not in self._data.keys():
+			return
+
 		try:
 			df = self.pd_data
 
@@ -2627,6 +2634,9 @@ class File:
 		if self._options.plot_pairgrid_kv:
 			print(f'Pair grid KV: {description}')
 			self.graph_pairgrid_kv()
+		if self._options.plot_ecdf_grid:
+			print(f'ECDF grid: {description}')
+			self.graph_ecdf_grid()
 
 		## Special case graphs:
 		# exp_at3_rww:
