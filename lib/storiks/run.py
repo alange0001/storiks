@@ -55,7 +55,7 @@ def cancel(number=''):
 	"""
 	print(_storiksd_send(f'cancel {number}'))
 
-def schedule(cmd, output=None, append=False, overwrite=False, compress=False):
+def schedule(cmd, output=None, append=False, overwrite=False, compress=False, workdir=None):
 	"""Send the command "schedule" to storiksd.
 	Schedule a command or experiment to be executed by storiksd.
 
@@ -71,5 +71,7 @@ def schedule(cmd, output=None, append=False, overwrite=False, compress=False):
 	if append is True: prefix_cmd.append('--append')
 	if overwrite is True: prefix_cmd.append('--overwrite')
 	if compress is True: prefix_cmd.append('--compress')
+	workdir = workdir if workdir is not None else os.path.abspath('.')
+	prefix_cmd += ['--workdir', workdir]
 	ret = _storiksd_send(f'{shlex.join(prefix_cmd)} {cmd}')
 	print(ret)
