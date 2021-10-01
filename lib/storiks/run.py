@@ -16,6 +16,7 @@ import socket
 import shlex
 
 def _storiksd_send(cmd):
+	"""Send a command to storiks daemon (storiksd)."""
 	comm_dir = os.getenv("STORIKS_COMMUNICATION_DIR")
 	if comm_dir is not None:
 		sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -28,6 +29,27 @@ def _storiksd_send(cmd):
 		raise Exception('undefined environment variable STORIKS_COMMUNICATION_DIR')
 
 send = _storiksd_send
+
+def _storiks_send(cmd):
+	"""Send a command to the current storiks experiment (if running)."""
+	comm_dir = os.getenv("STORIKS_COMMUNICATION_DIR")
+	if comm_dir is None:
+		raise Exception('undefined environment variable STORIKS_COMMUNICATION_DIR')
+
+	pathfile = os.path.join(comm_dir, 'storiks_socket.path')
+	if not os.path.isfile(pathfile):
+		raise Exception(f'file {pathfile} not found')
+
+	with open(pathfile, 'rt') as f:
+		sockpath = f.readline().strip()
+		# print(f'DEBUG: sockpath={sockpath}')
+		sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+		sock.connect(sockpath)
+		sock.sendall(bytes(cmd, 'utf-8'))
+		return str(sock.recv(4 * 1024 ** 2), 'utf-8')
+
+def send_exp(cmd):
+	print(_storiks_send(cmd))
 
 def list():
 	"""Send the command "list" to storiksd.
