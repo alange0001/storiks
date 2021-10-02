@@ -422,6 +422,7 @@ class ControllerImpl : public Controller {
 			bool update_last = false;
 
 #			define handle_cmd(name, ulast) if (!handled && cmd.command == #name) {handled = true; update_last = ulast; success = handle_##name(cmd);}
+			handle_cmd(help,           false);
 			handle_cmd(report,         false);
 			handle_cmd(metadata,       false);
 			handle_cmd(listproperties, false);
@@ -468,6 +469,29 @@ class ControllerImpl : public Controller {
 			}
 		}
 		return cfhandle;
+	}
+
+	bool handle_help(CommandLine& cmd) {
+		RCM_DEBUG("start command handler");
+		std::string ret = \
+				"Commands:\n" \
+				"\thelp                                 - show this help\n" \
+				"\treport [column_family=NAME]          - report database stats\n" \
+				"\tlistproperties                       - list database properties\n" \
+				"\tmetadata [column_family=NAME]        - get database metadata\n" \
+				"\tsetdboptions NAME1=\"value1\" ...      - set one or more database configuration options\n" \
+				"\tgetoptions [column_family=NAME] NAME - get a column family option\n" \
+				"\tsetoptions [column_family=NAME] NAME1=\"value1\" ... - set one or more column family options\n" \
+				"\tgetproperty name=\"NAME\" type={str|int|map} [column_family=NAME]  - get a database or column family property\n" \
+				"General Parameters:\n" \
+				"\tdebug={0|1}                  - output debug information\n" \
+				"\toutput={stderr|socket|both}  - redirect output\n" \
+				"\ttag_before.NAME=\"VALUE\"      - create a report tag with NAME and VALUE in the output log before the command execution\n" \
+				"\ttag.NAME=\"VALUE\"             - create a report tag with NAME and VALUE in the output log after the command execution\n" \
+				;
+
+		RCM_REPORT("%s", ret.c_str());
+		return true;
 	}
 
 	bool handle_report(CommandLine& cmd) {
