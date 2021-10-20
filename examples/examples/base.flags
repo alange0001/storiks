@@ -2,7 +2,7 @@
 --sync_stats
 --perfmon
 ### YCSB basic options ###
---rocksdb_config_file=/output/rocksdb.options
+--rocksdb_config_file=rocksdb.options
 --num_ydbs=0
 --ydb_num_keys=50000000
 --ydb_threads=4
