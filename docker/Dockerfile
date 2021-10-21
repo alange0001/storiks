@@ -4,7 +4,7 @@ LABEL maintainer="Adriano Lange"
 LABEL email="alange0001@gmail.com"
 
 RUN apt-get update && \
-    apt-get install -y wget bzip2 curl smartmontools && \
+    apt-get install -y wget bzip2 curl smartmontools fio && \
     apt-get install -y libgflags2.2 libsnappy1v5 zlib1g libbz2-1.0 liblz4-1 libzstd1 libaio1 && \
     apt-get install -y openjdk-16-jdk-headless && \
     apt-get clean && \
