@@ -37,15 +37,6 @@
 
 ////////////////////////////////////////////////////////////////////////////////////
 #undef __CLASS__
-#define __CLASS__ ""
-
-const size_t aligned_buffer_size = 512;
-struct alignas(aligned_buffer_size) aligned_buffer_t {
-	char data[aligned_buffer_size];
-};
-
-////////////////////////////////////////////////////////////////////////////////////
-#undef __CLASS__
 #define __CLASS__ "Randomizer::"
 
 class Randomizer {
@@ -55,6 +46,7 @@ class Randomizer {
 	std::mt19937_64     rand_eng64;
 	const uint32_t      ratio_precision = 1024;
 	std::unique_ptr<std::uniform_int_distribution<uint32_t>> dist_ratio;
+	std::uniform_int_distribution<uint64_t> dist64;
 
 	Randomizer() {
 		auto seed = rd();
@@ -74,17 +66,15 @@ class Randomizer {
 
 		const uint64_t size_ratio = sizeof(uint64_t) / sizeof(char);
 		uint64_t size_type = size / size_ratio;
-		std::uniform_int_distribution<uint64_t> dist;
 
 		uint64_t first_i = 0;
 		if (step > 1) {
-			std::uniform_int_distribution<uint64_t> dist_step(0, step-1);
-			first_i = dist_step(rand_eng64);
+			first_i = dist64(rand_eng64) % step;
 		}
 
 		uint64_t* b = reinterpret_cast<uint64_t*>(buffer);
 		for (uint64_t i = first_i; i < size_type; i += step) {
-			b[i] = dist(rand_eng64);
+			b[i] = dist64(rand_eng64);
 		}
 	}
 
@@ -161,7 +151,7 @@ class PosixEngine : public GenericEngine {
 	access_params_t access_params;
 	offset_released_t offset_released;
 
-	std::unique_ptr<aligned_buffer_t[]> buffer_mem;
+	std::unique_ptr<char> buffer_mem;
 	char*      buffer = nullptr;
 	size_t     cur_size = 0;
 	long long  cur_offset = 0;
@@ -188,8 +178,8 @@ class PosixEngine : public GenericEngine {
 		if (cur_size != params.size) {
 			DEBUG_MSG("request size changed from {} to {}", cur_size, params.size);
 			cur_size = params.size;
-			buffer_mem.reset(new aligned_buffer_t[cur_size/sizeof(aligned_buffer_t)]);
-			buffer = buffer_mem[0].data;
+			buffer_mem.reset((char*) std::aligned_alloc(cur_size, cur_size));
+			buffer = buffer_mem.get();
 			randomizer.randomize_buffer(buffer, cur_size);
 		} else if (params.write && cur_write) { // randomize 5% of the buffer due to repeated writes
 			randomizer.randomize_buffer(buffer, cur_size, 20);
@@ -254,7 +244,7 @@ class AIORequest {
 	size_t           size   = 0;
 	long long        offset = 0;
 
-	std::unique_ptr<aligned_buffer_t[]> buffer_mem;
+	std::unique_ptr<char> buffer_mem;
 	char*            buffer = nullptr;
 
 	AIORequest(Options* options_) : options(options_) {
@@ -262,17 +252,9 @@ class AIORequest {
 		pos = options->pos_count++;
 	}
 
-	~AIORequest() {
-		if (active) {
-			spdlog::info("AIORequest[{}] is still active. Canceling it.", pos);
-			io_event event;
-			auto ret = io_cancel(*(options->ctx), &cb, &event);
-			if (ret < 0) {
-				spdlog::warn("\tio_cancel returned error {}:{}", ret, E2S(ret));
-			}
-		}
-	}
+	~AIORequest() {}
 
+	// first: read=false, write=true
 	bool request() {
 		assert(pos >= 0);
 		assert(!active);
@@ -282,8 +264,8 @@ class AIORequest {
 		if (size != params.size) {
 			DEBUG_MSG("request size changed from {} to {}", size, params.size);
 			size = params.size;
-			buffer_mem.reset(new aligned_buffer_t[size/sizeof(aligned_buffer_t)]);
-			buffer = buffer_mem[0].data;
+			buffer_mem.reset((char*) std::aligned_alloc(size, size));
+			buffer = buffer_mem.get();
 			randomizer.randomize_buffer(buffer, size);
 		} else if (params.write && write) { // randomize 5% of the buffer due to repeated writes
 			randomizer.randomize_buffer(buffer, size, 20);
@@ -398,7 +380,7 @@ class AIOEngine : public GenericEngine {
 
 		if (stop_) return;
 
-		timespec timeout = {.tv_sec  = 0, .tv_nsec = 200 * 1000 * 1000 };
+		timespec timeout = {.tv_sec  = 0, .tv_nsec = 20 * 1000 * 1000 };
 		io_event events[max_iodepth];
 
 		auto nevents = io_getevents(ctx, 1, max_iodepth, events, &timeout);
@@ -495,7 +477,7 @@ class Prwv2Engine : public GenericEngine {
 	void worker_thread(int pos) {
 		try {
 			size_t cur_size = -1;
-			std::unique_ptr<aligned_buffer_t[]> buffer_mem;
+			std::unique_ptr<char> buffer_mem;
 			char* buffer = nullptr;
 			bool write = false;
 
@@ -512,8 +494,8 @@ class Prwv2Engine : public GenericEngine {
 					if (cur_size != params.size) {
 						DEBUG_MSG("(posix thread[{}]) request size changed from {} to {}", pos, cur_size, params.size);
 						cur_size = params.size;
-						buffer_mem.reset(new aligned_buffer_t[cur_size/sizeof(aligned_buffer_t)]);
-						buffer = buffer_mem[0].data;
+						buffer_mem.reset((char*) std::aligned_alloc(cur_size, cur_size));
+						buffer = buffer_mem.get();
 						randomizer.randomize_buffer(buffer, cur_size);
 					} else if (params.write && write) { // randomize 5% of the buffer due to repeated writes
 						randomizer.randomize_buffer(buffer, cur_size, 20);
@@ -657,7 +639,8 @@ class EngineController {
 		spdlog::info("creating file {}", args->filename);
 
 		const uint32_t buffer_size = 1024 * 1024;
-		alignas(aligned_buffer_size) char buffer[buffer_size];
+		std::unique_ptr<char> buffer_mem((char*) std::aligned_alloc(buffer_size, buffer_size));
+		char* buffer = buffer_mem.get();
 		randomizer.randomize_buffer(buffer, buffer_size);
 
 		auto fd = open(args->filename.c_str(), O_CREAT|O_RDWR|O_DIRECT, 0640);
