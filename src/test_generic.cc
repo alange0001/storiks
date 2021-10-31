@@ -40,27 +40,21 @@ void signalHandler(int signal) {
 
 int main(int argc, char** argv) {
 	std::signal(SIGTERM, signalHandler);
-	std::signal(SIGSEGV, signalHandler);
 	std::signal(SIGINT,  signalHandler);
-	std::signal(SIGILL,  signalHandler);
-	std::signal(SIGABRT, signalHandler);
-	std::signal(SIGFPE,  signalHandler);
 	spdlog::set_level(spdlog::level::debug);
 	DEBUG_MSG("Initiating...");
 
 	DEBUG_MSG("argc = {}", argc);
+	std::vector<std::string> cmd_list;
 	for (int i=0; i<argc; i++) {
 		DEBUG_MSG("argv[{}] = {}", i, argv[i]);
+		cmd_list.push_back(argv[i]);
 	}
 
 	try {
-		std::vector<std::string> cmd_list;
-		for (int i = 1; i < argc; i++) {
-			cmd_list.push_back(argv[i]);
-		}
-
 		args.reset(new FakeArgs());
 		// args.reset(new Args(argc, argv));
+
 
 
 	} catch (const std::exception& e) {
