@@ -21,22 +21,13 @@
 #include <random>
 
 #include <gflags/gflags.h>
+#include <spdlog/spdlog.h>
+
+#include "bitmap.h"
 
 ////////////////////////////////////////////////////////////////////////////////////
 #undef __CLASS__
 #define __CLASS__ ""
-
-#define ERROR_MSG(format, ...) fprintf(stderr, "ERROR: " format "\n", ##__VA_ARGS__)
-#define WARN_MSG(format, ...) fprintf(stderr, "WARN: " format "\n", ##__VA_ARGS__)
-#define INFO_MSG(format, ...) fprintf(stderr, "INFO: " format "\n", ##__VA_ARGS__)
-#define DEBUG 1
-#ifdef DEBUG
-#define DEBUG_MSG(format, ...) fprintf(stderr, "DEBUG [%d] %s(): " format "\n", __LINE__, __func__ , ##__VA_ARGS__)
-#else
-#define DEBUG_MSG(format, ...)
-#endif
-
-#define V2S(val) std::to_string(val).c_str()
 
 ////////////////////////////////////////////////////////////////////////////////////
 
@@ -50,7 +41,7 @@ DEFINE_string(filename, "0", "file name");
 static bool stop = false;
 
 static void signalHandler(int signal) {
-	WARN_MSG("received signal %d", signal);
+	spdlog::warn("received signal {}", signal);
 	stop = true;
 	std::signal(signal, SIG_DFL);
 }
@@ -65,7 +56,7 @@ struct Defer {
 
 std::random_device  rd;
 std::mt19937_64     rand_eng;
-std::uniform_int_distribution<uint64_t> dist;
+std::uniform_int_distribution<uint64_t> unirand64;
 
 static void rand_init() {
 	rand_eng.seed(rd());
@@ -76,38 +67,39 @@ static void randomize_buffer(char* buffer, unsigned size) {
 	unsigned size64 = size / (sizeof(uint64_t)/sizeof(char));
 
 	for (unsigned i = 0; i < size64; i++) {
-		buffer64[i] = dist(rand_eng);
+		buffer64[i] = unirand64(rand_eng);
 	}
 }
 
 static void randomize_buffer2(char* buffer, unsigned size) {
 	auto buffer64 = (uint64_t*) buffer;
-	unsigned size64 = size / (sizeof(uint64_t)/sizeof(char));
 
-	unsigned cycle = 4 * (size / 512);
-	if (cycle < 10)
-		cycle = 10;
+	typeof(size) size64 = size / (sizeof(uint64_t)/sizeof(char));
+	typeof(size) step = 64;
 
 	while (!stop) {
-		for (unsigned i = 0; i < 20; i++) {
-			auto r = dist(rand_eng);
-			buffer64[r % size64] = r;
+		typeof(size) i0 = unirand64(rand_eng) % step;
+		for (typeof(size) i = i0; i < size64; i+=step) {
+			buffer64[i] = unirand64(rand_eng);
 		}
-		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
 	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
+#undef __CLASS__
+#define __CLASS__ ""
 
 int main(int argc, char** argv) {
 	std::signal(SIGTERM, signalHandler);
 	std::signal(SIGINT,  signalHandler);
-	INFO_MSG("Initiating...");
+	spdlog::set_level(spdlog::level::debug);
+	spdlog::info("Initiating...");
 
 	std::vector<std::string> cmd_list;
-	INFO_MSG("argc = %d", argc);
+	spdlog::info("argc = {}", argc);
 	for (typeof(argc) i=0; i<argc; i++) {
-		INFO_MSG("argv[%d] = %s", i, argv[i]);
+		spdlog::info("argv[{}] = {}", i, argv[i]);
 		cmd_list.push_back(argv[i]);
 	}
 	gflags::SetUsageMessage(std::string("\nUSAGE:\n\t") + argv[0] + " [OPTIONS]...");
@@ -118,31 +110,32 @@ int main(int argc, char** argv) {
 
 		// -----------------------------------------------------------
 		// PARAMETERS:
-		uint32_t duration     = FLAGS_duration;
-		std::string filename  = FLAGS_filename;
-		uint32_t iodepth      = FLAGS_iodepth;
-		uint32_t block_size   = FLAGS_block_size;
+		uint32_t duration     = FLAGS_duration;     spdlog::info("duration   = {}", duration);
+		std::string filename  = FLAGS_filename;     spdlog::info("filename   = {}", filename.c_str());
+		uint32_t iodepth      = FLAGS_iodepth;      spdlog::info("iodepth    = {}", iodepth);
+		uint32_t block_size   = FLAGS_block_size;   spdlog::info("block_size = {}", block_size);
 		uint32_t block_size_b = block_size * 1024;
 
 		// -----------------------------------------------------------
 		// FILE INFORMATION:
 		uint64_t file_blocks;
 		{
-			DEBUG_MSG("get stats from file: %s", filename.c_str());
+			DEBUG_MSG("get stats from file: {}", filename);
 			struct stat st;
 			if (stat(filename.c_str(), &st) == EOF)
 				throw std::runtime_error("can't read file stats");
 			file_blocks = st.st_size / block_size_b;
-			DEBUG_MSG("\tst_size = %s", V2S(st.st_size));
-			DEBUG_MSG("\tst_blksize = %s", V2S(st.st_blksize));
+			DEBUG_MSG("\tst_size = {}", st.st_size);
+			DEBUG_MSG("\tst_blksize = {}", st.st_blksize);
 		}
-		DEBUG_MSG("file_blocks = %s", V2S(file_blocks));
+		DEBUG_MSG("file_blocks = {}", file_blocks);
+		Bitmap used_bitmap(file_blocks);
 
-		std::uniform_int_distribution<uint64_t> rand_block(0, file_blocks);
+		std::uniform_int_distribution<uint64_t> rand_block(0, file_blocks -1);
 
 		// -----------------------------------------------------------
 		// OPEN FILE:
-		DEBUG_MSG("open file \"%s\"", filename.c_str());
+		DEBUG_MSG("open file \"{}\"", filename);
 		auto filed = open(filename.c_str(), O_RDWR|O_DIRECT, 0640);
 		if (filed < 0) {
 			throw std::runtime_error("can't open file");
@@ -156,8 +149,11 @@ int main(int argc, char** argv) {
 		io_queue_init(iodepth, &ctx);
 
 		iocb iocb_data[iodepth];
-		char* buffers = (char*) std::aligned_alloc(block_size_b, iodepth * block_size_b);
-		randomize_buffer(buffers, iodepth * block_size_b);
+		std::unique_ptr<std::unique_ptr<char>[]> buffers_mem(new std::unique_ptr<char>[iodepth]);
+		for (int i=0; i<iodepth; i++) {
+			buffers_mem[i].reset(static_cast<char*>(std::aligned_alloc(block_size_b * 8, block_size_b)));
+			randomize_buffer(buffers_mem[i].get(), block_size_b);
+		}
 
 		// -----------------------------------------------------------
 		// COUNTDOWN THREAD:
@@ -169,7 +165,9 @@ int main(int argc, char** argv) {
 
 		// RANDOMIZE BUFFER THREAD:
 		std::thread t2([&]{
-			randomize_buffer2(buffers, iodepth * block_size_b);
+			for (int i=0; i<iodepth; i++) {
+				randomize_buffer2(buffers_mem[i].get(), block_size_b);
+			}
 		});
 		Defer def_t2([&]{ t2.join(); });
 
@@ -179,11 +177,12 @@ int main(int argc, char** argv) {
 		int rc;
 		io_event events[1];
 		for (typeof(iodepth) i = 0; i < iodepth; i++) {
-			io_prep_pwrite(&iocb_data[i], filed, &buffers[i * block_size_b], block_size_b, rand_block(rand_eng) * block_size_b);
+			uint64_t next_block = used_bitmap.next_unused( rand_block(rand_eng) );
+			io_prep_pwrite(&iocb_data[i], filed, buffers_mem[i].get(), block_size_b, next_block * block_size_b);
 			iocbs[0] = &iocb_data[i];
 			rc = io_submit(ctx, 1, iocbs);
 			if (rc != 1)
-				ERROR_MSG("io_submit returned %s", V2S(rc));
+				spdlog::error("io_submit returned {}", rc);
 		}
 		// ===========================================================
 		// MAIN LOOP:
@@ -191,25 +190,26 @@ int main(int argc, char** argv) {
 			rc = io_getevents(ctx, 1, 1, events, nullptr);
 			if (rc > 0) {
 				if (events->res != block_size_b) {
-					ERROR_MSG("res=%s != block_size_b", V2S(events->res));
+					spdlog::error("res={} != block_size_b", events->res);
 				}
-				io_prep_pwrite(events->obj, filed, events->obj->u.c.buf, block_size_b, rand_block(rand_eng) * block_size_b);
+				uint64_t next_block = used_bitmap.next_unused( rand_block(rand_eng) );
+				io_prep_pwrite(events->obj, filed, events->obj->u.c.buf, block_size_b, next_block * block_size_b);
 				iocbs[0] = events->obj;
 				rc = io_submit(ctx, 1, iocbs);
 				if (rc != 1)
-					ERROR_MSG("io_submit returned %s", V2S(rc));
+					spdlog::error("io_submit returned {}", rc);
 			} else {
-				ERROR_MSG("io_getevents returned %s", V2S(rc));
+				spdlog::error("io_getevents returned {}", rc);
 			}
 		}
 		io_queue_release(ctx);
 		// ===========================================================
 
 	} catch (const std::exception& e) {
-		ERROR_MSG("Exception received: %s", e.what());
+		spdlog::error("Exception received: {}", e.what());
 		return 1;
 	}
 
-	INFO_MSG("return 0");
+	spdlog::info("return 0");
 	return 0;
 }
