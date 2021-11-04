@@ -69,12 +69,9 @@ class Randomizer {
 		const uint64_t size_ratio = sizeof(uint64_t) / sizeof(char);
 		uint64_t size_type = size / size_ratio;
 
-		uint64_t first_i = 0;
-		if (step > 1) {
-			first_i = dist64(rand_eng64) % step;
-		}
+		uint64_t first_i = (step == 1) ? 0 : (dist64(rand_eng64) % step);
 
-		uint64_t* b = reinterpret_cast<uint64_t*>(buffer);
+		uint64_t* b = (uint64_t*)buffer;
 		for (uint64_t i = first_i; i < size_type; i += step) {
 			b[i] = dist64(rand_eng64);
 		}
@@ -269,8 +266,8 @@ class AIORequest {
 			buffer_mem.reset((char*) std::aligned_alloc(size, size));
 			buffer = buffer_mem.get();
 			randomizer.randomize_buffer(buffer, size);
-		} else if (params.write && write) { // randomize 5% of the buffer due to repeated writes
-			randomizer.randomize_buffer(buffer, size, 20);
+		} else if (write) { // randomize some parts of the buffer due to repeated writes
+			randomizer.randomize_buffer(buffer, size, 128);
 		}
 
 		stats = Stats{
@@ -382,7 +379,7 @@ class AIOEngine : public GenericEngine {
 
 		io_event event;
 
-		for (uint32_t i = 0; !stop_ && i < (iodepth * 10); i++) {
+		for (uint32_t i = 0; !stop_ && i < 40; i++) {
 			timespec timeout = {.tv_sec  = 0, .tv_nsec = 200 * 1000 * 1000 };
 
 			auto nevents = io_getevents(ctx, 1, 1, &event, &timeout);

@@ -74,16 +74,11 @@ static void randomize_buffer(char* buffer, unsigned size) {
 
 static void randomize_buffer2(char* buffer, unsigned size) {
 	auto buffer64 = (uint64_t*) buffer;
-
 	typeof(size) size64 = size / (sizeof(uint64_t)/sizeof(char));
-	typeof(size) step = 64;
-
-	while (!stop) {
-		typeof(size) i0 = unirand64(rand_eng) % step;
-		for (typeof(size) i = i0; i < size64; i+=step) {
-			buffer64[i] = unirand64(rand_eng);
-		}
-		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	typeof(size) step = 128;
+	typeof(size) i0 = unirand64(rand_eng) % step;
+	for (typeof(size) i = i0; i < size64; i+=step) {
+		buffer64[i] = unirand64(rand_eng);
 	}
 }
 
@@ -164,14 +159,6 @@ int main(int argc, char** argv) {
 		});
 		t1.detach();
 
-		// RANDOMIZE BUFFER THREAD:
-		std::thread t2([&]{
-			for (int i=0; i<iodepth; i++) {
-				randomize_buffer2(buffers_mem[i].get(), block_size_b);
-			}
-		});
-		Defer def_t2([&]{ t2.join(); });
-
 		// ===========================================================
 		// 1st I/O SUBMIT:
 		iocb* iocbs[1];
@@ -195,6 +182,7 @@ int main(int argc, char** argv) {
 					spdlog::error("res={} != block_size_b", events->res);
 				}
 				auto cb = events->obj;
+				randomize_buffer2((char*)cb->u.c.buf, block_size_b);
 				uint64_t next_block = used_bitmap.next_unused( rand_ratio(rand_eng) * (file_blocks -1) );
 				io_prep_pwrite(cb, filed, cb->u.c.buf, block_size_b, next_block * block_size_b);
 				//fprintf(stdout, "rand_block = %lu\n", next_block);

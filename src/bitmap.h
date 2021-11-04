@@ -27,7 +27,7 @@
 #define __CLASS__ "Bitmap::"
 
 class Bitmap {
-	const uint64_t min_size = 10;
+	const uint64_t min_size = 30;
 	const uint64_t chunk_size = sizeof(uint64_t) * 8;
 	uint64_t       chunk_size_last;
 	const uint64_t max_memory = (1000*1000*1000)/8; // 1Gb / 8bits/B = 119MiB
@@ -67,7 +67,7 @@ class Bitmap {
 		bitmap.reset(static_cast<uint64_t*>(std::aligned_alloc(sizeof(uint64_t), sizeof(uint64_t) * chunks)));
 
 		if (used_threshold_ == 0) {
-			used_threshold = size - (size / 10); // 90%
+			used_threshold = size - (size / 20); // 95%
 		} else {
 			if (used_threshold_ >= min_size && used_threshold_ <= size)
 				used_threshold = used_threshold_;
