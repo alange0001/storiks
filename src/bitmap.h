@@ -64,10 +64,10 @@ class Bitmap {
 					V2S((chunks * sizeof(uint64_t))/(1024*1024)) +
 					"MiB (the maximum is " + V2S(max_memory/(1024*1024)) + "MiB)").c_str());
 		spdlog::info("Bitmap using {}KiB", (chunks * sizeof(uint64_t))/1024);
-		bitmap.reset(new uint64_t[chunks]);
+		bitmap.reset(static_cast<uint64_t*>(std::aligned_alloc(sizeof(uint64_t), sizeof(uint64_t) * chunks)));
 
 		if (used_threshold_ == 0) {
-			used_threshold = size - (size / 5); // 10%
+			used_threshold = size - (size / 10); // 90%
 		} else {
 			if (used_threshold_ >= min_size && used_threshold_ <= size)
 				used_threshold = used_threshold_;

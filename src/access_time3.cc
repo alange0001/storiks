@@ -34,6 +34,7 @@
 
 #include "access_time3_args.h"
 #include "util.h"
+#include "bitmap.h"
 
 ////////////////////////////////////////////////////////////////////////////////////
 #undef __CLASS__
@@ -47,6 +48,7 @@ class Randomizer {
 	const uint32_t      ratio_precision = 1024;
 	std::unique_ptr<std::uniform_int_distribution<uint32_t>> dist_ratio;
 	std::uniform_int_distribution<uint64_t> dist64;
+	std::uniform_real_distribution<double> rand_double;
 
 	Randomizer() {
 		auto seed = rd();
@@ -378,35 +380,34 @@ class AIOEngine : public GenericEngine {
 			}
 		}
 
-		if (stop_) return;
+		io_event event;
 
-		timespec timeout = {.tv_sec  = 0, .tv_nsec = 20 * 1000 * 1000 };
-		io_event events[max_iodepth];
+		for (uint32_t i = 0; !stop_ && i < (iodepth * 10); i++) {
+			timespec timeout = {.tv_sec  = 0, .tv_nsec = 200 * 1000 * 1000 };
 
-		auto nevents = io_getevents(ctx, 1, max_iodepth, events, &timeout);
+			auto nevents = io_getevents(ctx, 1, 1, &event, &timeout);
 
-		if (stop_) return;
+			if (stop_) return;
 
-		if (nevents < 0) {
-			if (nevents != -EAGAIN && nevents != -EINTR) {
-				spdlog::warn("io_getevents returned {}:{}", nevents, E2S(nevents));
-			} else {
-				throw std::runtime_error(fmt::format("io_getevents returned error: {}:{}", nevents, E2S(nevents)).c_str());
-			}
-		} else if (nevents > 0) {
-			Stats stats_sum;
-			for (int i = 0; i < nevents; i++) {
-				if (events[i].data) {
-					auto req = ((AIORequest*) events[i].data);
+			if (nevents > 0) {
+				if (event.data) {
+					auto req = ((AIORequest*) event.data);
 					assert(req->pos >= 0 && req->pos < max_iodepth);
 					req->request_finished();
-					stats_sum += req->stats;
-
+					increment_stats(req->stats);
 					if (req->pos < iodepth)
 						req->request();
+				} else {
+					throw std::runtime_error("undefined aio request data");
+				}
+
+			} else if (nevents < 0) {
+				if (nevents != -EAGAIN && nevents != -EINTR) {
+					spdlog::warn("io_getevents returned {}:{}", nevents, E2S(nevents));
+				} else {
+					throw std::runtime_error(fmt::format("io_getevents returned error: {}:{}", nevents, E2S(nevents)).c_str());
 				}
 			}
-			increment_stats(stats_sum);
 		}
 	}
 };
@@ -593,7 +594,9 @@ class EngineController {
 	public: //---------------------------------------------------------------------
 	Stats stats;
 
-	EngineController(Args* args_) : args(args_) {
+	Bitmap used_blocks;
+
+	EngineController(Args* args_) : args(args_), used_blocks(100) {
 		DEBUG_MSG("constructor");
 		assert(args != nullptr);
 
@@ -716,8 +719,6 @@ class EngineController {
 	uint64_t file_blocks = 0;
 	uint64_t cur_block   = 0;
 
-	std::unique_ptr<std::uniform_int_distribution<uint64_t>> rand_block;
-
 	void check_arg_updates() {
 		if (cur_block_size != args->block_size) { // check block size
 			DEBUG_MSG("cur_block_size changed from {} to {}", cur_block_size, args->block_size);
@@ -729,7 +730,7 @@ class EngineController {
 			file_blocks = (args->filesize * 1024) / cur_block_size;
 			cur_block = file_blocks; // seek 0 if next sequential I/O
 
-			rand_block.reset(new std::uniform_int_distribution<uint64_t>(0, file_blocks -1));
+			used_blocks.resize(file_blocks);
 
 			block_size_lock.unlock();
 		}
@@ -766,12 +767,9 @@ class EngineController {
 			ret.size       = buffer_size;
 
 			if (randomizer.randomize_ratio(args->random_ratio)) { //random access
-				cur_block = (*rand_block)(randomizer.rand_eng64);
+				cur_block = used_blocks.next_unused( randomizer.rand_double(randomizer.rand_eng64) * (file_blocks -1) );
 			} else { //sequential access
-				cur_block++;
-				if (cur_block >= file_blocks) {
-					cur_block = 0;
-				}
+				cur_block = (cur_block +1) % file_blocks;
 			}
 			ret.offset = cur_block * buffer_size;
 
@@ -781,7 +779,7 @@ class EngineController {
 		};
 
 		//-----------------------------------------------------
-		offset_released_lambda = [this](long long offset)->void {};
+		offset_released_lambda = [](long long offset)->void {};
 		//-----------------------------------------------------
 	}
 

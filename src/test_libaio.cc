@@ -57,6 +57,7 @@ struct Defer {
 std::random_device  rd;
 std::mt19937_64     rand_eng;
 std::uniform_int_distribution<uint64_t> unirand64;
+std::uniform_real_distribution<double> rand_ratio;
 
 static void rand_init() {
 	rand_eng.seed(rd());
@@ -151,7 +152,7 @@ int main(int argc, char** argv) {
 		iocb iocb_data[iodepth];
 		std::unique_ptr<std::unique_ptr<char>[]> buffers_mem(new std::unique_ptr<char>[iodepth]);
 		for (int i=0; i<iodepth; i++) {
-			buffers_mem[i].reset(static_cast<char*>(std::aligned_alloc(block_size_b * 8, block_size_b)));
+			buffers_mem[i].reset(static_cast<char*>(std::aligned_alloc(block_size_b, block_size_b)));
 			randomize_buffer(buffers_mem[i].get(), block_size_b);
 		}
 
@@ -175,9 +176,8 @@ int main(int argc, char** argv) {
 		// 1st I/O SUBMIT:
 		iocb* iocbs[1];
 		int rc;
-		io_event events[1];
 		for (typeof(iodepth) i = 0; i < iodepth; i++) {
-			uint64_t next_block = used_bitmap.next_unused( rand_block(rand_eng) );
+			uint64_t next_block = used_bitmap.next_unused( rand_ratio(rand_eng) * (file_blocks -1) );
 			io_prep_pwrite(&iocb_data[i], filed, buffers_mem[i].get(), block_size_b, next_block * block_size_b);
 			iocbs[0] = &iocb_data[i];
 			rc = io_submit(ctx, 1, iocbs);
@@ -186,18 +186,23 @@ int main(int argc, char** argv) {
 		}
 		// ===========================================================
 		// MAIN LOOP:
+		io_event events[iodepth];
 		while (!stop) {
-			rc = io_getevents(ctx, 1, 1, events, nullptr);
+			timespec timeout = {.tv_sec  = 0, .tv_nsec = 200 * 1000 * 1000 };
+			rc = io_getevents(ctx, 1, 1, events, &timeout);
 			if (rc > 0) {
 				if (events->res != block_size_b) {
 					spdlog::error("res={} != block_size_b", events->res);
 				}
-				uint64_t next_block = used_bitmap.next_unused( rand_block(rand_eng) );
-				io_prep_pwrite(events->obj, filed, events->obj->u.c.buf, block_size_b, next_block * block_size_b);
-				iocbs[0] = events->obj;
+				auto cb = events->obj;
+				uint64_t next_block = used_bitmap.next_unused( rand_ratio(rand_eng) * (file_blocks -1) );
+				io_prep_pwrite(cb, filed, cb->u.c.buf, block_size_b, next_block * block_size_b);
+				//fprintf(stdout, "rand_block = %lu\n", next_block);
+				iocbs[0] = cb;
 				rc = io_submit(ctx, 1, iocbs);
 				if (rc != 1)
 					spdlog::error("io_submit returned {}", rc);
+
 			} else {
 				spdlog::error("io_getevents returned {}", rc);
 			}
