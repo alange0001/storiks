@@ -37,7 +37,6 @@ class Bitmap {
 	uint64_t size;
 	uint64_t chunks;
 	uint64_t used = 0;
-	uint64_t used_threshold;
 	uint64_t colisions = 0;
 	std::unique_ptr<uint64_t[]> bitmap;
 
@@ -66,15 +65,6 @@ class Bitmap {
 		spdlog::info("Bitmap using {}KiB", (chunks * sizeof(uint64_t))/1024);
 		bitmap.reset(static_cast<uint64_t*>(std::aligned_alloc(sizeof(uint64_t), sizeof(uint64_t) * chunks)));
 
-		if (used_threshold_ == 0) {
-			used_threshold = size - (size / 20); // 95%
-		} else {
-			if (used_threshold_ >= min_size && used_threshold_ <= size)
-				used_threshold = used_threshold_;
-			else
-				throw std::runtime_error(fmt::format("invalid used_threshold={} (must be >= {} and <= size={})", used_threshold_, min_size, size).c_str());
-		}; DEBUG_MSG("used_threshold = {}", used_threshold);
-
 		clear();
 	}
 
@@ -85,47 +75,36 @@ class Bitmap {
 		memset(bitmap.get(), 0, chunks * sizeof(uint64_t));
 	}
 
-	void auto_clear() {
-		if (used >= used_threshold)
-			clear();
-	}
-
 	uint64_t next_unused(uint64_t val) {
 		if (val >= size)
 			throw std::runtime_error(fmt::format("bit position {} is out of range (0-{})", val, size-1).c_str());
 
-		auto_clear();
-
 		uint64_t add_colision = 0;
-		while (true) {
-			uint64_t chunk_idx = val / chunk_size;
-			uint64_t chunk_bits = bitmap[chunk_idx];
-			//DEBUG_MSG("val={:<8}, chunk_idx={:<8}, chunk_bits={}", val, chunk_idx, bitstring(chunk_bits));
-			if (chunk_bits != full(chunk_idx)) { // there are unused bits
-				uint64_t val_bit, val_in_chunk;
-				uint64_t cur_chunk_size = chunk_size_by_idx(chunk_idx);
-				for (val_bit = (val % chunk_size);; val_bit = (val_bit + 1) % cur_chunk_size) {
-					val_in_chunk = (uint64_t)1 << val_bit;
-					if (! (chunk_bits & val_in_chunk))
-						break;
-					add_colision = 1;
-				}
+		uint64_t chunk_idx = val / chunk_size;
+		uint64_t chunk_bits = bitmap[chunk_idx];
+		//DEBUG_MSG("val={:<8}, chunk_idx={:<8}, chunk_bits={}", val, chunk_idx, bitstring(chunk_bits));
 
-				bitmap[chunk_idx] = chunk_bits | val_in_chunk;
-				used++;
-				colisions += add_colision;
+		if (chunk_bits == full(chunk_idx)) // chunk is full
+			chunk_bits = 0;
 
-				val = (chunk_idx * chunk_size) + val_bit;
-				//DEBUG_MSG("return {:<25}, chunk_bits={}", val, bitstring(bitmap[chunk_idx]));
-				if (val >= size)
-					throw std::runtime_error(fmt::format("BUG: bitmap next value={} >= size={}", val, size).c_str());
-				return val;
-
-			} else { // chunk is full. try next
-				val = ((chunk_idx + 1) % chunks) * chunk_size;
-				add_colision = 1;
-			}
+		uint64_t val_bit, val_in_chunk;
+		uint64_t cur_chunk_size = chunk_size_by_idx(chunk_idx);
+		for (val_bit = (val % chunk_size);; val_bit = (val_bit + 1) % cur_chunk_size) {
+			val_in_chunk = (uint64_t)1 << val_bit;
+			if (! (chunk_bits & val_in_chunk))
+				break;
+			add_colision = 1;
 		}
+
+		bitmap[chunk_idx] = chunk_bits | val_in_chunk;
+		used++;
+		colisions += add_colision;
+
+		val = (chunk_idx * chunk_size) + val_bit;
+		//DEBUG_MSG("return {:<25}, chunk_bits={}", val, bitstring(bitmap[chunk_idx]));
+		if (val >= size)
+			throw std::runtime_error(fmt::format("BUG: bitmap next value={} >= size={}", val, size).c_str());
+		return val;
 	};
 
 	uint64_t full(uint64_t chunk_idx) {
