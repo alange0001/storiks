@@ -31,6 +31,7 @@
 
 ////////////////////////////////////////////////////////////////////////////////////
 
+DEFINE_int32(stats_interval, 5, "stats interval");
 DEFINE_int32(iodepth, 4, "I/O depth");
 DEFINE_int32(block_size, 4, "block size");
 DEFINE_int32(duration, 20, "duration");
@@ -106,11 +107,12 @@ int main(int argc, char** argv) {
 
 		// -----------------------------------------------------------
 		// PARAMETERS:
-		uint32_t duration     = FLAGS_duration;     spdlog::info("duration   = {}", duration);
-		std::string filename  = FLAGS_filename;     spdlog::info("filename   = {}", filename.c_str());
-		uint32_t iodepth      = FLAGS_iodepth;      spdlog::info("iodepth    = {}", iodepth);
-		uint32_t block_size   = FLAGS_block_size;   spdlog::info("block_size = {}", block_size);
-		uint32_t block_size_b = block_size * 1024;
+		uint32_t stats_interval = FLAGS_stats_interval; spdlog::info("stats_interval = {}", stats_interval);
+		uint32_t duration       = FLAGS_duration;       spdlog::info("duration   = {}", duration);
+		std::string filename    = FLAGS_filename;       spdlog::info("filename   = {}", filename.c_str());
+		uint32_t iodepth        = FLAGS_iodepth;        spdlog::info("iodepth    = {}", iodepth);
+		uint32_t block_size     = FLAGS_block_size;     spdlog::info("block_size = {}", block_size);
+		uint32_t block_size_b   = block_size * 1024;
 
 		// -----------------------------------------------------------
 		// FILE INFORMATION:
@@ -151,6 +153,8 @@ int main(int argc, char** argv) {
 			randomize_buffer(buffers_mem[i].get(), block_size_b);
 		}
 
+		uint64_t block_io_count = 0;
+
 		// -----------------------------------------------------------
 		// COUNTDOWN THREAD:
 		std::thread t1([&]{
@@ -158,6 +162,32 @@ int main(int argc, char** argv) {
 			stop = true;
 		});
 		t1.detach();
+
+		// -----------------------------------------------------------
+		// REPORT THREAD:
+		std::thread t2([&]{
+			auto t1 = std::chrono::system_clock::now();
+			auto blocks1 = block_io_count;
+			while (true) {
+				for (int i = 0; !stop && i < stats_interval * 4; i++) {
+					std::this_thread::sleep_for(std::chrono::milliseconds(250));
+				}
+				if (stop) return;
+				auto t2 = std::chrono::system_clock::now();
+				auto blocks2 = block_io_count;
+
+				auto delta_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+
+				spdlog::info("STATS: {:.2f} seconds; {} blocks/s; {:.3f} MiB/s",
+						(double) delta_ms / (double) 1000.0,
+						((blocks2 - blocks1) * 1000) / delta_ms,
+						(double)((blocks2 - blocks1) * 1000 * block_size) / (double)(delta_ms * 1024)
+						);
+
+				blocks1 = blocks2;
+				t1 = t2;
+			}
+		});
 
 		// ===========================================================
 		// 1st I/O SUBMIT:
@@ -181,6 +211,7 @@ int main(int argc, char** argv) {
 				if (events->res != block_size_b) {
 					spdlog::error("res={} != block_size_b", events->res);
 				}
+				block_io_count++;
 				auto cb = events->obj;
 				randomize_buffer2((char*)cb->u.c.buf, block_size_b);
 				uint64_t next_block = used_bitmap.next_unused( rand_ratio(rand_eng) * (file_blocks -1) );
@@ -197,6 +228,8 @@ int main(int argc, char** argv) {
 		}
 		io_queue_release(ctx);
 		// ===========================================================
+
+		t2.join();
 
 	} catch (const std::exception& e) {
 		spdlog::error("Exception received: {}", e.what());
