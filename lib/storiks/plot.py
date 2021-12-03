@@ -449,25 +449,90 @@ class AllFiles:
 				fig.savefig(save_name, bbox_inches="tight")
 		plt.show()
 
+	_pd_io_w = None
+	@property
+	def pd_io_w(self):
+		if self._pd_io_w is None:
+			dfaux = None
+			for f in self:
+				df = f.pd_data_exp('performancemonitor')
+				if df is None: continue
+				df['MiB/s'] = (df['disk.diskstats.rkB/s'] + df['disk.diskstats.wkB/s']) / 1024.
+				wlist = f.w_list
+				if wlist is None: continue
+				for w in wlist.values():
+					df.loc[df['time'] >= w['time'], 'w_name'] = w['name']
+					df.loc[df['time'] >= w['time'], 'w'] = int(w['number'])
+				df = df[df['time'] <= f.time_max]
+				df = df.groupby(['w', 'w_name'], as_index=False).agg({'MiB/s': 'mean'})
+				df['label'] = f.file_label
+				dfaux = df if dfaux is None else pd.concat([dfaux, df], sort=False)
+			dfaux['w'] = dfaux['w'].astype(int)
+			self._pd_io_w = dfaux
+
+		return self._pd_io_w
+
+	_pd_io_w_cols = None
+	@property
+	def pd_io_w_cols(self):
+		if self._pd_io_w_cols is None:
+			pd_io_w = self.pd_io_w
+			if pd_io_w is None: return None
+
+			dfaux = None
+			for l in pd_io_w['label'].unique():
+				df = pd_io_w[pd_io_w['label'] == l][['w', 'w_name', 'MiB/s']]
+				df = df.rename(columns={'MiB/s':f'{l}(MiB/s)'})
+				dfaux = df if dfaux is None else \
+						pd.merge(dfaux, df, how='inner', on=['w', 'w_name'])
+			self._pd_io_w_cols = dfaux
+
+		return self._pd_io_w_cols
+
 	def graph_io_w(self):
 		fig, ax = plt.subplots()
 		fig.set_figheight(3)
 		fig.set_figwidth(12)
 
-		for f in self:
-			df = f.pd_data_exp('performancemonitor')
-			if df is None: continue
-			df['disk.diskstats.MiB/s'] = (df['disk.diskstats.rkB/s'] + df['disk.diskstats.wkB/s']) / 1024.
-			for w in f.w_list.values():
-				df.loc[df['time'] >= w['time'], 'w_name'] = w['name']
-				df.loc[df['time'] >= w['time'], 'w'] = int(w['number'])
-			# mean_dfs.append(df.groupby(['w', 'w_name'], as_index=False).agg({'disk.diskstats.MiB/s': 'mean'}))
-			sns.lineplot(ax=ax, x='w_name', y=f'disk.diskstats.MiB/s', data=df,
-						 label=f.file_label)
+		dfaux = self.pd_io_w
+		if dfaux is None:
+			print(f'WARN: no pd_io_w data required by AllFiles.graph_io_w_bar()')
+			return
+
+		for l in dfaux['label'].unique():
+			sns.lineplot(ax=ax, data=dfaux[dfaux['label'] == l], y='MiB/s', x='w_name', label=l)
 
 		ax.grid(which='major', color='#CCCCCC', linestyle='--')
 		ax.set(xlabel="concurrent workloads", ylabel="disk:MiB/s")
 		ax.legend(loc='upper left', ncol=1, frameon=True, bbox_to_anchor=(1.02, 1.), borderaxespad=0)
+
+		if self._options.save:
+			for f in self._options.formats:
+				save_name = f'{self._filename}-io_w.{f}'
+				fig.savefig(save_name, bbox_inches="tight")
+		plt.show()
+
+	def graph_io_w_bar(self):
+		fig, ax = plt.subplots()
+		fig.set_figheight(3)
+		fig.set_figwidth(12)
+
+		dfaux = self.pd_io_w
+		if dfaux is None:
+			print(f'WARN: no pd_io_w data required by AllFiles.graph_io_w_bar()')
+			return
+
+		sns.barplot(ax=ax, data=dfaux, y='MiB/s', x='w_name', hue='label')
+
+		ax.grid(which='major', color='#CCCCCC', linestyle='--')
+		ax.set(xlabel="concurrent workloads", ylabel="disk:MiB/s")
+		ax.legend(loc='upper left', ncol=1, frameon=True, bbox_to_anchor=(1.02, 1.), borderaxespad=0)
+
+		if self._options.save:
+			for f in self._options.formats:
+				save_name = f'{self._filename}-io_w_bar.{f}'
+				fig.savefig(save_name, bbox_inches="tight")
+		plt.show()
 
 
 class File:
@@ -677,6 +742,20 @@ class File:
 
 	def count_dbs(self):
 		return (self._num_dbs, self._num_ydbs)
+
+	_time_max = None
+	@property
+	def time_max(self):
+		if self._time_max is None:
+			tmax = 0
+			l = [ get_recursive(self.data, i, -1, 'time') for i in self.data.keys() ]
+			l = list(filter(lambda x: x is not None, l))
+			if len(l) > 0:
+				tmax = min(l)
+			else:
+				print('WARN: File.time_max = 0')
+			self._time_max = tmax
+		return self._time_max
 
 	_at3_changes = None
 	@property
