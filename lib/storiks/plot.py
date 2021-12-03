@@ -467,7 +467,8 @@ class AllFiles:
 				df = df.groupby(['w', 'w_name'], as_index=False).agg({'MiB/s': 'mean'})
 				df['label'] = f.file_label
 				dfaux = df if dfaux is None else pd.concat([dfaux, df], sort=False)
-			dfaux['w'] = dfaux['w'].astype(int)
+			if dfaux is not None:
+				dfaux['w'] = dfaux['w'].astype(int)
 			self._pd_io_w = dfaux
 
 		return self._pd_io_w
@@ -490,14 +491,14 @@ class AllFiles:
 		return self._pd_io_w_cols
 
 	def graph_io_w(self):
-		fig, ax = plt.subplots()
-		fig.set_figheight(3)
-		fig.set_figwidth(12)
-
 		dfaux = self.pd_io_w
 		if dfaux is None:
 			print(f'WARN: no pd_io_w data required by AllFiles.graph_io_w_bar()')
 			return
+
+		fig, ax = plt.subplots()
+		fig.set_figheight(3)
+		fig.set_figwidth(12)
 
 		for l in dfaux['label'].unique():
 			sns.lineplot(ax=ax, data=dfaux[dfaux['label'] == l], y='MiB/s', x='w_name', label=l)
@@ -513,14 +514,14 @@ class AllFiles:
 		plt.show()
 
 	def graph_io_w_bar(self):
-		fig, ax = plt.subplots()
-		fig.set_figheight(3)
-		fig.set_figwidth(12)
-
 		dfaux = self.pd_io_w
 		if dfaux is None:
 			print(f'WARN: no pd_io_w data required by AllFiles.graph_io_w_bar()')
 			return
+
+		fig, ax = plt.subplots()
+		fig.set_figheight(3)
+		fig.set_figwidth(12)
 
 		sns.barplot(ax=ax, data=dfaux, y='MiB/s', x='w_name', hue='label')
 
