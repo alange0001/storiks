@@ -383,7 +383,7 @@ class AllFiles:
 				fig.savefig(save_name, bbox_inches="tight")
 		plt.show()
 
-	def graph_join_pressure(self) -> None:
+	def graph_join_pressure(self, **args) -> None:
 		pressures = list(filter(
 			lambda x: x[1] is not None,
 			[(f, f.join_pressures()) for f in self._file_objs]))
@@ -396,11 +396,11 @@ class AllFiles:
 		fig = plt.figure()
 		gs = fig.add_gridspec(1, 2, hspace=0., wspace=0.)
 		axs = gs.subplots()
-		fig.set_figheight(0.7 * n_data)
-		fig.set_figwidth(20)
+		fig.set_figheight(coalesce(args.get('figheight'), 0.7) * n_data)
+		fig.set_figwidth(coalesce(args.get('figwidth'), 20))
 
-		axs[0].set(title='Interference: KV-store on concurrent workloads')
-		axs[1].set(title='Interference: concurrent workloads on KV-store')
+		axs[0].set(title='Interference on concurrent workloads')
+		axs[1].set(title='Interference on KV-store')
 
 		Y_labels = []
 		Y_ticks = []
@@ -440,8 +440,8 @@ class AllFiles:
 
 		axs[0].yaxis.set_ticklabels(Y_labels)
 		axs[1].yaxis.set_ticklabels([None for y in Y_labels])
-		axs[0].set(xlabel="normalized pressure: $(\\rho(w_i^b)-\\rho(w_i^a)) / \\rho(w_i^b)$")
-		axs[1].set(xlabel="normalized pressure: $(\\rho(w_0)-\\rho(w_i)) / \\rho(w_0)$")
+		axs[0].set(xlabel="normalized pressure")
+		axs[1].set(xlabel="normalized pressure")
 
 		if self._options.save:
 			for f in self._options.formats:
