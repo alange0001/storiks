@@ -399,8 +399,8 @@ class AllFiles:
 		fig.set_figheight(coalesce(args.get('figheight'), 0.7) * n_data)
 		fig.set_figwidth(coalesce(args.get('figwidth'), 20))
 
-		axs[0].set(title='Interference on concurrent workloads')
-		axs[1].set(title='Interference on KV-store')
+		axs[0].set(title=coalesce(args.get('title_left'), 'Interference on concurrent workloads'))
+		axs[1].set(title=coalesce(args.get('title_right'), 'Interference on KV-store'))
 
 		Y_labels = []
 		Y_ticks = []
@@ -440,8 +440,8 @@ class AllFiles:
 
 		axs[0].yaxis.set_ticklabels(Y_labels)
 		axs[1].yaxis.set_ticklabels([None for y in Y_labels])
-		axs[0].set(xlabel="normalized pressure")
-		axs[1].set(xlabel="normalized pressure")
+		axs[0].set(xlabel=coalesce(args.get('xlabel_left'), "normalized pressure"))
+		axs[1].set(xlabel=coalesce(args.get('xlabel_right'), "normalized pressure"))
 
 		if self._options.save:
 			for f in self._options.formats:
@@ -908,6 +908,9 @@ class File:
 				while len(v) < maxlen: v.append(None)
 
 			df = pd.DataFrame(datatrasposed)
+			timemax = self.time_max
+			if timemax is not None:
+				df = df[df['time'] <= timemax]
 			self._pd_data_exp[name] = df
 			return df
 		else:
