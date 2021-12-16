@@ -422,6 +422,9 @@ class AllFiles:
 				if X0[i] is not None:
 					axs[0].annotate(f'{X_labels[i]}', xy=(X0[i], i_ax), xytext=(X0[i] + 0.007, i_ax + 0.2), rotation=90)
 
+			if args.get('print_values') is True:
+				print(f'{file.file_label} kv : {[round(x, 2) if x is not None else None for x in X1.values]}')
+				print(f'{file.file_label} at3: {[round(x, 2) if x is not None else None for x in X0.values]}')
 			axs[1].plot(X1, [i_ax for x in X1], 'o', color=colors[0])
 			axs[0].plot(X0, [i_ax for x in X1], 'o', color=colors[0])
 			Y_ticks.append(i_ax)
