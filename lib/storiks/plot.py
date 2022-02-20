@@ -431,7 +431,10 @@ class AllFiles:
 			i_ax -= 1
 
 		axs[1].set_xlim([min(min_list1)-0.05, 1.05])
-		axs[0].set_xlim([1.05, min(min_list0)-0.05])
+		if args.get('invert_at') is True:
+			axs[0].set_xlim([1.05, min(min_list0)-0.05])
+		else:
+			axs[0].set_xlim([min(min_list0) - 0.05, 1.05])
 		for ax in axs:
 			ax.set_ylim([i_ax + 0.8, 0.7])
 			ax.yaxis.set_ticks(Y_ticks)
