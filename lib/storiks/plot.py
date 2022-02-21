@@ -337,6 +337,33 @@ class AllFiles:
 		self._file_pressures = ret
 		return self._file_pressures
 
+	_file_pressures_df = None
+	@property
+	def file_pressures_df(self):
+		if self._file_pressures_df is not None:
+			return self._file_pressures_df
+
+		pressures = list(filter(
+			lambda x: x[1] is not None,
+			[(f, f.join_pressures()) for f in self._file_objs]))
+		if len(pressures) == 0:
+			return
+
+		df_data = []
+		for file, data in pressures:
+			X1 = data['norm_pressure_kv']
+			X0 = data['norm_pressure_at']
+			W_name = data['w_name']
+			W = data['w_counter']
+
+			for t, XX in zip(['kv', 'at3'], [X1, X0]):
+				for w, wname, v in zip(W, W_name, XX.values):
+					df_data.append([file.file_label, t, w, wname, round(v, 2)])
+
+		df_cols = ['file', 'pressure type', 'w_counter', 'w_name', 'norm. pressure']
+		self._file_pressures_df = pd.DataFrame(df_data, columns=df_cols)
+		return self._file_pressures_df
+
 	def graph_pressure(self) -> None:
 		pressures = self.file_pressures
 		if len(list(filter(lambda x: x is not None, pressures))) == 0:
@@ -452,6 +479,46 @@ class AllFiles:
 		if self._options.save:
 			for f in self._options.formats:
 				save_name = f'{self._filename}-pressure.{f}'
+				fig.savefig(save_name, bbox_inches="tight")
+		plt.show()
+
+	def graph_join_pressure_bar(self, **args) -> None:
+		pressures = list(filter(
+			lambda x: x[1] is not None,
+			[(f, f.join_pressures()) for f in self._file_objs]))
+		if len(pressures) == 0:
+			return
+
+		df = self.file_pressures_df if args.get('data') is None else args.get('data')
+
+		if args.get('print_values') is True:
+			for f, pt in df.loc[:, ['file', 'pressure type']].drop_duplicates().values:
+				print(f, pt, [f'{x[0]}:{x[1]}' for x in df.loc[
+					(df['file'] == f) & (df['pressure type'] == pt), ['w_name', 'norm. pressure']].values])
+
+		plot_args = dict(x="file", y="norm. pressure",
+						hue="w_name", col="pressure type",
+						data=df, kind="bar", height=3, aspect=2.5)
+		if args.get('plot_args') is not None:
+			plot_args = dict(**plot_args, **args.get('plot_args'))
+		g = sns.catplot(**plot_args)
+
+		for ax in g.fig.axes:
+			ax.set_xticklabels(ax.get_xticklabels(), rotation=30)
+			ax.set_ylim([None, 1])
+			ax.yaxis.set_tick_params(which='major', reset=True)
+			ax.grid(which='major', color='#888888', linestyle='--')
+			ax.grid(which='minor', color='#CCCCCC', linestyle=':')
+			ax.yaxis.set_minor_locator(AutoMinorLocator(4))
+			ax.xaxis.grid(visible=False)
+
+		g.fig.axes[0].set(title=coalesce(args.get('title_kv'), 'Interference on KV-store'))
+		g.fig.axes[1].set(title=coalesce(args.get('title_at3'), 'Interference on concurrent workloads'))
+
+		fig = g.fig
+		if self._options.save:
+			for f in self._options.formats:
+				save_name = f'{self._filename}-pressure_bar.{f}'
 				fig.savefig(save_name, bbox_inches="tight")
 		plt.show()
 
