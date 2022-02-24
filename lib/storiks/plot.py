@@ -489,22 +489,32 @@ class AllFiles:
 		if len(pressures) == 0:
 			return
 
-		df = self.file_pressures_df if args.get('data') is None else args.get('data')
+		if args.get('data') is None:
+			df = self.file_pressures_df.loc[self.file_pressures_df['w_counter'] != 0]
+		else:
+			df = args.get('data')
+
+		if callable(args.get('data_filter')):
+			df = args.get('data_filter')(df)
 
 		if args.get('print_values') is True:
 			for f, pt in df.loc[:, ['file', 'pressure type']].drop_duplicates().values:
 				print(f, pt, [f'{x[0]}:{x[1]}' for x in df.loc[
 					(df['file'] == f) & (df['pressure type'] == pt), ['w_name', 'norm. pressure']].values])
 
-		plot_args = dict(x="file", y="norm. pressure",
-						hue="w_name", col="pressure type",
-						data=df, kind="bar", height=3, aspect=2.5)
-		if args.get('plot_args') is not None:
-			plot_args = dict(**plot_args, **args.get('plot_args'))
+		plot_args = {**dict(x="file", y="norm. pressure",
+		                    hue="w_name", col="pressure type",
+		                    data=df, kind="bar", height=3, aspect=2.5, palette='Dark2'),
+		             **coalesce(args.get('plot_args'), dict())}
 		g = sns.catplot(**plot_args)
 
 		for ax in g.fig.axes:
-			ax.set_xticklabels(ax.get_xticklabels(), rotation=30)
+			if args.get('xticklabels_replace') is not None:
+				for i in ax.get_xticklabels():
+					i.set_text(i.get_text().replace(*args.get('xticklabels_replace')))
+			l = ax.get_xticklabels()
+			xticklabels_args = {**dict(rotation=30), **coalesce(args.get('xticklabels_args'), dict())}
+			ax.set_xticklabels(l, **xticklabels_args)
 			ax.set_ylim([None, 1])
 			ax.yaxis.set_tick_params(which='major', reset=True)
 			ax.grid(which='major', color='#888888', linestyle='--')
@@ -520,7 +530,9 @@ class AllFiles:
 			for f in self._options.formats:
 				save_name = f'{self._filename}-pressure_bar.{f}'
 				fig.savefig(save_name, bbox_inches="tight")
-		plt.show()
+		if coalesce(args.get('show'), True) is True:
+			plt.show()
+		return g
 
 	_pd_io_w = None
 	@property
