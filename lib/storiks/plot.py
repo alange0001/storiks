@@ -540,14 +540,9 @@ class AllFiles:
 		if self._pd_io_w is None:
 			dfaux = None
 			for f in self:
-				df = f.pd_data_exp('performancemonitor')
+				df = f.pd_data_exp('performancemonitor').copy()
 				if df is None: continue
 				df['MiB/s'] = (df['disk.diskstats.rkB/s'] + df['disk.diskstats.wkB/s']) / 1024.
-				wlist = f.w_list
-				if wlist is None: continue
-				for w in wlist.values():
-					df.loc[df['time'] >= w['time'], 'w_name'] = w['name']
-					df.loc[df['time'] >= w['time'], 'w'] = int(w['number'])
 				df = df[df['time'] <= f.time_max]
 				df = df.groupby(['w', 'w_name'], as_index=False).agg({'MiB/s': 'mean'})
 				df['label'] = f.file_label
@@ -996,7 +991,17 @@ class File:
 			timemax = self.time_max
 			if timemax is not None:
 				df = df[df['time'] <= timemax]
-			self._pd_data_exp[name] = df
+
+			df['w_name'] = 'w0'
+			df['w_count'] = pd.to_numeric(0, downcast='integer')
+			df['w'] = pd.to_numeric(0, downcast='integer')
+			if isinstance(self.w_list, dict):
+				for w in self.w_list.values():
+					df.loc[df['time'] >= w['time'], 'w_name'] = w['name']
+					df.loc[df['time'] >= w['time'], 'w'] = w['number']
+					df.loc[df['time'] >= w['time'], 'w_count'] = w['number']
+
+			self._pd_data_exp[name] = df.copy()
 			return df
 		else:
 			return self._pd_data_exp[name]
@@ -1978,7 +1983,7 @@ class File:
 
 			pd1 = pd.DataFrame({
 				'time'      : timelist,
-				'ops_per_s' : [ target_data[t]['db'][target_attribute] for t in timelist ],
+				'ops_per_s' : [ get_recursive(target_data, t, 'db', target_attribute) for t in timelist ],
 				'w'         : [ target_data[t]['at3'] for t in timelist ],
 				'w_counter' : [ target_data[t]['at3_counter'] for t in timelist ],
 				})
@@ -2127,8 +2132,6 @@ class File:
 			mean_dfs = []
 			for f in (self, self.at3_steady_file):
 				df = f.pd_data_exp('access_time3[0]')
-				for w in f.w_list.values():
-					df.loc[df['time'] >= w['time'], 'w_name'] = w['name']
 				mean_dfs.append(df.groupby('w_name', as_index=False).agg({'total_MiB/s': 'mean'}))
 			df = pd.merge(*mean_dfs, how='outer', on='w_name')
 			df['norm_pressure_at'] = (df['total_MiB/s_y'] - df['total_MiB/s_x']) / df['total_MiB/s_y']
