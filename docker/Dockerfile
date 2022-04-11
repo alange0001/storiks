@@ -5,7 +5,7 @@ LABEL email="alange0001@gmail.com"
 
 RUN apt-get update && \
     apt-get install -y wget bzip2 curl smartmontools fio && \
-    apt-get install -y libgflags2.2 libsnappy1v5 zlib1g libbz2-1.0 liblz4-1 libzstd1 libaio1 && \
+    apt-get install -y libgflags2.2 libsnappy1v5 zlib1g libbz2-1.0 liblz4-1 libzstd1 libaio1 poppler-utils && \
     apt-get install -y openjdk-16-jdk-headless && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
@@ -24,7 +24,7 @@ ENV PYTHONPATH /opt/storiks/lib
 ENV YCSB_PATH /opt/YCSB
 
 RUN \
-    conda install -y IPython numpy matplotlib pandas seaborn natsort psutil jupyter
+    conda install -y IPython numpy matplotlib pandas seaborn natsort psutil jupyter pdf2image
 
 ENV STORIKS_PATH /opt/storiks/bin:/opt/performancemonitor:/opt/YCSB/bin:/opt/rocksdb/bin:/usr/local/conda/bin
 
