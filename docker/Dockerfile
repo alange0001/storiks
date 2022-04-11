@@ -24,7 +24,8 @@ ENV PYTHONPATH /opt/storiks/lib
 ENV YCSB_PATH /opt/YCSB
 
 RUN \
-    conda install -y IPython numpy matplotlib pandas seaborn natsort psutil jupyter pdf2image
+    conda install -y IPython numpy matplotlib pandas seaborn natsort psutil jupyter && \
+    conda install -y -c conda-forge pdf2image
 
 ENV STORIKS_PATH /opt/storiks/bin:/opt/performancemonitor:/opt/YCSB/bin:/opt/rocksdb/bin:/usr/local/conda/bin
 
