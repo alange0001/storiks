@@ -25,6 +25,8 @@ import json
 import copy
 import sqlite3
 import numpy
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.ticker import (AutoMinorLocator, MultipleLocator)
